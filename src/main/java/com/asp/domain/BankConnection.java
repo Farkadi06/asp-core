@@ -40,6 +40,9 @@ public class BankConnection {
     @Column(length = 50)
     private String step;
 
+    @Column(name = "user_ref", nullable = false)
+    private String userRef;
+
     @Column(columnDefinition = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
     @Builder.Default

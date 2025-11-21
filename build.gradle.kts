@@ -4,6 +4,8 @@ plugins {
     id("io.spring.dependency-management") version "1.1.5"
 }
 
+import org.gradle.api.tasks.wrapper.Wrapper
+
 group = "com.asp"
 version = "1.0.0-SNAPSHOT"
 
@@ -61,5 +63,10 @@ tasks.withType<JavaCompile> {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+tasks.wrapper {
+    gradleVersion = "8.7"
+    distributionType = Wrapper.DistributionType.BIN
 }
 

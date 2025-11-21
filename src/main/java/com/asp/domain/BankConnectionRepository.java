@@ -10,6 +10,7 @@ import java.util.UUID;
 @Repository
 public interface BankConnectionRepository extends JpaRepository<BankConnection, UUID> {
     List<BankConnection> findAllByTenantId(UUID tenantId);
+    List<BankConnection> findAllByTenantIdAndUserRef(UUID tenantId, String userRef);
     Optional<BankConnection> findByIdAndTenantId(UUID id, UUID tenantId);
 }
 

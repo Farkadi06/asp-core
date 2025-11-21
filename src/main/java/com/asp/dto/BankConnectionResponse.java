@@ -16,7 +16,8 @@ public class BankConnectionResponse {
     private UUID connectionId;
     private UUID bankId;
     private String status;
-    private String nextStep;
+    private String userRef;
+    private BankConnectionNextStep nextStep;
     private Map<String, Object> metadata;
 }
 
