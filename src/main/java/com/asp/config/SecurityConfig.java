@@ -31,7 +31,9 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers("/v1/ping").permitAll()  // Allow testing without auth
-                .requestMatchers("/v1/api-keys/**").authenticated()  // API key management requires auth
+                .requestMatchers("/v1/api-keys", "/v1/api-keys/**").authenticated()  // API key management requires auth
+                .requestMatchers("/v1/banks/**").authenticated()  // Bank directory requires auth
+                .requestMatchers("/v1/bank-connections/**").authenticated()  // Bank connections require auth
                 .requestMatchers("/v1/**").authenticated()
                 .anyRequest().permitAll())
             .addFilterBefore(apiKeyAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
