@@ -1,7 +1,8 @@
 package com.asp.config;
 
 import com.asp.security.ApiKeyAuthenticationFilter;
-import lombok.RequiredArgsConstructor;
+import com.asp.security.ApiKeyService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -14,13 +15,15 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 @Configuration
 @EnableWebSecurity
-@RequiredArgsConstructor
 public class SecurityConfig {
 
-    private final ApiKeyAuthenticationFilter apiKeyAuthenticationFilter;
+    @Bean
+    public ApiKeyAuthenticationFilter apiKeyAuthenticationFilter(ApiKeyService apiKeyService, ObjectMapper objectMapper) {
+        return new ApiKeyAuthenticationFilter(apiKeyService, objectMapper);
+    }
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, ApiKeyAuthenticationFilter apiKeyAuthenticationFilter) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> 
