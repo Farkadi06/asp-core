@@ -34,6 +34,7 @@ public class SecurityConfig {
                 .requestMatchers("/v1/api-keys", "/v1/api-keys/**").authenticated()  // API key management requires auth
                 .requestMatchers("/v1/banks/**").authenticated()  // Bank directory requires auth
                 .requestMatchers("/v1/bank-connections/**").authenticated()  // Bank connections require auth
+                .requestMatchers("/v1/ingestions/**").authenticated()  // Ingestion requires auth
                 .requestMatchers("/v1/**").authenticated()
                 .anyRequest().permitAll())
             .addFilterBefore(apiKeyAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

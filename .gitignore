@@ -27,6 +27,7 @@ logs/
 cursor/
 .cursor/
 changelog/
+storage/
 
 ###############################################
 # CONFIGS & SECRETS
