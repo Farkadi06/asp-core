@@ -36,6 +36,7 @@ public class SecurityConfig {
                 .requestMatchers("/v1/bank-connections/**").authenticated()  // Bank connections require auth
                 .requestMatchers("/v1/ingestions/**").authenticated()  // Ingestion requires auth
                 .requestMatchers("/v1/accounts/**").authenticated()  // Account queries require auth
+                .requestMatchers("/internal/**").authenticated()  // Internal endpoints require auth
                 .requestMatchers("/v1/**").authenticated()
                 .anyRequest().permitAll())
             .addFilterBefore(apiKeyAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

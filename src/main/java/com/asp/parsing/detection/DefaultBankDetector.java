@@ -36,61 +36,23 @@ public class DefaultBankDetector implements BankDetector {
         log.debug("Detecting bank from text (length: {}), bankConnectionId: {}", 
             extractedText != null ? extractedText.length() : 0, bankConnectionId);
 
-        if (extractedText == null || extractedText.trim().isEmpty()) {
-            log.warn("Empty text provided for bank detection, using fallback");
-            return getFallbackResult(bankConnectionId);
-        }
-
-        String text = extractedText.toLowerCase();
-        Map<String, Integer> matches = new HashMap<>();
-        List<String> matchedPatterns = new ArrayList<>();
-
-        // Check each bank pattern
-        for (Map.Entry<String, Pattern> entry : BANK_PATTERNS.entrySet()) {
-            Pattern pattern = entry.getValue();
-            java.util.regex.Matcher matcher = pattern.matcher(text);
-            int count = 0;
-            while (matcher.find()) {
-                count++;
-            }
-            if (count > 0) {
-                matches.put(entry.getKey(), count);
-                matchedPatterns.add(entry.getKey() + " (matches: " + count + ")");
-            }
-        }
-
-        // Determine best match
-        if (matches.isEmpty()) {
-            log.warn("No bank patterns matched, using fallback");
-            return getFallbackResult(bankConnectionId);
-        }
-
-        // Find bank with most matches
-        String detectedBank = matches.entrySet().stream()
-            .max(Map.Entry.comparingByValue())
-            .map(Map.Entry::getKey)
-            .orElse(null);
-
-        if (detectedBank == null) {
-            return getFallbackResult(bankConnectionId);
-        }
-
-        int matchCount = matches.get(detectedBank);
-        BankDetectionResult.DetectionConfidence confidence = determineConfidence(matchCount, text.length());
-
-        log.info("Detected bank: {} with confidence: {} (matches: {})", 
-            detectedBank, confidence, matchCount);
-
+        // TEMPORARY: Hardcode CIH for debugging
+        log.info("TEMPORARY: Hardcoding bank detection to 'cih' for debugging");
         Map<String, Object> metadata = new HashMap<>();
-        metadata.put("matchCount", matchCount);
-        metadata.put("allMatches", matches);
-
+        metadata.put("source", "hardcoded_debug");
+        metadata.put("originalLength", extractedText != null ? extractedText.length() : 0);
+        
         return BankDetectionResult.builder()
-            .bankIdentifier(detectedBank)
-            .confidence(confidence)
+            .bankIdentifier("cih")
+            .confidence(BankDetectionResult.DetectionConfidence.HIGH)
             .metadata(metadata)
-            .matchedPatterns(matchedPatterns)
+            .matchedPatterns(List.of("cih (hardcoded)"))
             .build();
+
+        // Original detection logic will be restored later:
+        // - Pattern matching against BANK_PATTERNS
+        // - Fallback to bank connection lookup
+        // - Confidence calculation based on match count
     }
 
     private BankDetectionResult.DetectionConfidence determineConfidence(int matchCount, int textLength) {

@@ -55,12 +55,15 @@ public class CihPdfParser implements ParserStrategy {
 
     @Override
     public ParserResult parse(String extractedText, BankDetectionResult detection, IngestionContext context) {
-        log.info("[INGESTION:{}] Parsing CIH statement", context.getIngestionId());
+        log.info("[CIH][INGESTION:{}] Starting CIH statement parsing", context.getIngestionId());
 
         if (extractedText == null || extractedText.trim().isEmpty()) {
-            log.warn("[INGESTION:{}] Empty text extracted from PDF", context.getIngestionId());
+            log.warn("[CIH][INGESTION:{}] Empty text extracted from PDF", context.getIngestionId());
             return createEmptyResult("Empty text extracted from PDF");
         }
+
+        log.info("[CIH][INGESTION:{}] Extracted text length: {} characters", 
+            context.getIngestionId(), extractedText.length());
 
         List<ParserWarning> warnings = new ArrayList<>();
         Map<String, Object> metadata = new HashMap<>();
@@ -111,6 +114,7 @@ public class CihPdfParser implements ParserStrategy {
             }
 
             // 3. Parse transactions
+            log.info("[CIH][INGESTION:{}] Starting transaction parsing...", context.getIngestionId());
             List<NormalizedTransaction> transactions = parseTransactions(
                 extractedText,
                 accountNumber,
@@ -119,6 +123,13 @@ public class CihPdfParser implements ParserStrategy {
                 warnings,
                 context
             );
+            log.info("[CIH][INGESTION:{}] Transaction parsing complete: {} transactions found", 
+                context.getIngestionId(), transactions.size());
+
+            if (transactions.isEmpty()) {
+                log.warn("[CIH][INGESTION:{}] WARNING: ParserResult.transactions is EMPTY! This may indicate a parsing issue.", 
+                    context.getIngestionId());
+            }
 
             // 4. Build account
             NormalizedAccount account = NormalizedAccount.builder()
@@ -127,6 +138,7 @@ public class CihPdfParser implements ParserStrategy {
                 .currency(currency)
                 .bankIdentifier("cih")
                 .build();
+            log.info("[CIH][INGESTION:{}] Account created: accountNumber={}", context.getIngestionId(), accountNumber);
 
             // 5. Build snapshot
             NormalizedAccountSnapshot snapshot = null;
@@ -142,6 +154,11 @@ public class CihPdfParser implements ParserStrategy {
                     .totalCredits(null)
                     .transactionCount(transactions.size())
                     .build();
+                log.info("[CIH][INGESTION:{}] Snapshot created: date={}, balance={}", 
+                    context.getIngestionId(), openingDate, openingBalance);
+            } else {
+                log.warn("[CIH][INGESTION:{}] No snapshot created (missing opening date or balance)", 
+                    context.getIngestionId());
             }
 
             // 6. Build statement period
@@ -218,30 +235,57 @@ public class CihPdfParser implements ParserStrategy {
         int year = openingDate != null ? openingDate.getYear() : LocalDate.now().getYear();
         int parsedCount = 0;
         int skippedCount = 0;
+        int lineIndex = 0;
+
+        log.info("[CIH][INGESTION:{}] Starting transaction parsing: {} total lines, year={}", 
+            context.getIngestionId(), lines.length, year);
 
         for (String line : lines) {
+            lineIndex++;
+            String originalLine = line;
             line = line.trim();
+            
+            // Log every line being scanned
+            log.debug("[CIH][line {}] RAW: \"{}\"", lineIndex, originalLine);
+            
             if (line.isEmpty()) {
+                log.debug("[CIH][line {}] SKIP: Empty line", lineIndex);
                 continue;
             }
 
             // Step 1: Match transaction line pattern (two dates + rest)
             Matcher lineMatcher = TRANSACTION_LINE_PATTERN.matcher(line);
             if (!lineMatcher.matches()) {
-                // Not a transaction line, skip
+                // Not a transaction line, skip with warning
+                log.debug("[CIH][line {}][skip] TRANSACTION_LINE_PATTERN did not match: \"{}\"", lineIndex, line);
+                warnings.add(ParserWarning.builder()
+                    .code("NO_TX_MATCH")
+                    .message("Line does not match transaction pattern (expected: dd/MM dd/MM ...): " + line)
+                    .field("transactionLine")
+                    .build());
+                skippedCount++;
                 continue;
             }
 
-            try {
-                String operDateStr = lineMatcher.group(1);  // Operation date (dd/MM)
-                String valeurDateStr = lineMatcher.group(2);  // Valeur date (dd/MM)
-                String restOfLine = lineMatcher.group(3);  // Description + amount
+            // Log successful match
+            String operDateStr = lineMatcher.group(1);
+            String valeurDateStr = lineMatcher.group(2);
+            String restOfLine = lineMatcher.group(3);
+            log.debug("[CIH][line {}][match] TRANSACTION_LINE_PATTERN matched: oper={} valeur={} rest=\"{}\"", 
+                lineIndex, operDateStr, valeurDateStr, restOfLine);
 
+            try {
                 // Step 2: Parse dates
                 LocalDate operDate = parseTransactionDate(operDateStr, year, warnings);
                 LocalDate valeurDate = parseTransactionDate(valeurDateStr, year, warnings);
                 
                 if (operDate == null) {
+                    log.warn("[CIH][line {}][skip] Failed to parse operation date: {}", lineIndex, operDateStr);
+                    warnings.add(ParserWarning.builder()
+                        .code("INVALID_DATE")
+                        .message("Failed to parse operation date: " + operDateStr)
+                        .field("date")
+                        .build());
                     skippedCount++;
                     continue;
                 }
@@ -249,6 +293,7 @@ public class CihPdfParser implements ParserStrategy {
                 // Step 3: Extract description and amount from rest of line
                 Matcher descAmountMatcher = DESCRIPTION_AMOUNT_PATTERN.matcher(restOfLine);
                 if (!descAmountMatcher.matches()) {
+                    log.warn("[CIH][line {}][skip] DESCRIPTION_AMOUNT_PATTERN did not match: \"{}\"", lineIndex, restOfLine);
                     warnings.add(ParserWarning.builder()
                         .code("INVALID_TRANSACTION_FORMAT")
                         .message("Could not extract description and amount from: " + restOfLine)
@@ -260,10 +305,14 @@ public class CihPdfParser implements ParserStrategy {
 
                 String description = descAmountMatcher.group(1).trim();
                 String amountStr = descAmountMatcher.group(2).trim();
+                
+                log.debug("[CIH][line {}][amount] desc=\"{}\" amountStr=\"{}\"", 
+                    lineIndex, description, amountStr);
 
                 // Step 4: Parse amount
                 BigDecimal amount = parseFrenchAmount(amountStr);
                 if (amount == null) {
+                    log.warn("[CIH][line {}][skip] Failed to parse amount: \"{}\"", lineIndex, amountStr);
                     warnings.add(ParserWarning.builder()
                         .code("INVALID_AMOUNT")
                         .message("Could not parse amount: " + amountStr)
@@ -281,6 +330,7 @@ public class CihPdfParser implements ParserStrategy {
                 for (String keyword : DEBIT_KEYWORDS) {
                     if (descriptionUpper.contains(keyword)) {
                         isDebit = true;
+                        log.debug("[CIH][line {}][keyword] Found debit keyword: \"{}\"", lineIndex, keyword);
                         break;
                     }
                 }
@@ -290,14 +340,16 @@ public class CihPdfParser implements ParserStrategy {
                     for (String keyword : CREDIT_KEYWORDS) {
                         if (descriptionUpper.contains(keyword)) {
                             isDebit = false;
+                            log.debug("[CIH][line {}][keyword] Found credit keyword: \"{}\"", lineIndex, keyword);
                             break;
                         }
                     }
                 }
 
                 // Apply sign: debit is negative, credit is positive
+                BigDecimal finalAmount = amount;
                 if (isDebit) {
-                    amount = amount.negate();
+                    finalAmount = amount.negate();
                 }
 
                 NormalizedTransaction.TransactionType type = isDebit 
@@ -310,7 +362,7 @@ public class CihPdfParser implements ParserStrategy {
                     .accountType("CHECKING")
                     .transactionDate(operDate)  // Operation date
                     .valueDate(valeurDate != null ? valeurDate : operDate)  // Valeur date or fallback to oper date
-                    .amount(amount)
+                    .amount(finalAmount)
                     .currency(currency)
                     .description(line)  // Full original line for rawDescription
                     .bankReference(null)
@@ -322,11 +374,12 @@ public class CihPdfParser implements ParserStrategy {
                 transactions.add(transaction);
                 parsedCount++;
 
-                log.debug("[INGESTION:{}] Parsed transaction: {} {} {} {}", 
-                    context.getIngestionId(), operDate, description, amount, type);
+                log.info("[CIH][line {}][tx] Parsed -> date={}, amount={}, description=\"{}\", type={}", 
+                    lineIndex, operDate, finalAmount, description, type);
 
             } catch (Exception e) {
-                log.warn("[INGESTION:{}] Error parsing transaction line: {}", context.getIngestionId(), line, e);
+                log.error("[CIH][line {}][ERROR] Exception parsing transaction line: \"{}\"", 
+                    lineIndex, line, e);
                 warnings.add(ParserWarning.builder()
                     .code("TRANSACTION_PARSE_ERROR")
                     .message("Failed to parse transaction: " + e.getMessage())
@@ -335,14 +388,12 @@ public class CihPdfParser implements ParserStrategy {
             }
         }
 
-        log.info("[INGESTION:{}] Parsed {} transactions, skipped {} lines", 
-            context.getIngestionId(), parsedCount, skippedCount);
+        log.info("[CIH][INGESTION:{}] Transaction parsing complete: {} parsed, {} skipped, {} warnings", 
+            context.getIngestionId(), parsedCount, skippedCount, warnings.size());
         
-        if (skippedCount > 0) {
-            warnings.add(ParserWarning.builder()
-                .code("SKIPPED_TRANSACTIONS")
-                .message("Skipped " + skippedCount + " lines that did not match transaction pattern")
-                .build());
+        if (parsedCount == 0) {
+            log.warn("[CIH][INGESTION:{}] WARNING: No transactions were parsed! Total lines scanned: {}", 
+                context.getIngestionId(), lines.length);
         }
 
         return transactions;

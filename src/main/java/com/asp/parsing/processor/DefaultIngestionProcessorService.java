@@ -93,15 +93,18 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
 
             // Step 2: Extract text from PDF
             TextExtractionResult extractionResult = extractText(ingestion);
-            log.info("[INGESTION:{}] Text extraction completed: {} pages, {} characters",
-                ingestionId, extractionResult.getPageCount(), extractionResult.getText().length());
+            int textLength = extractionResult.getText() != null ? extractionResult.getText().length() : 0;
+            log.info("[INGESTION:{}] Extracted text length = {} characters, pages = {}",
+                ingestionId, textLength, extractionResult.getPageCount());
 
             // Step 3: Detect bank
             BankDetectionResult detectionResult = detectBank(ingestion, extractionResult.getText());
-            log.info("[INGESTION:{}] Bank detection completed: {} (confidence: {})",
-                ingestionId, detectionResult.getBankIdentifier(), detectionResult.getConfidence());
+            String bankIdentifier = detectionResult.getBankIdentifier();
+            log.info("[INGESTION:{}] Bank detected = {} (confidence: {})",
+                ingestionId, bankIdentifier, detectionResult.getConfidence());
 
-            if (detectionResult.getBankIdentifier() == null) {
+            if (bankIdentifier == null) {
+                log.error("[INGESTION:{}] Bank detection failed - bank identifier is null", ingestionId);
                 markFailed(ingestion, "DETECTION_UNKNOWN_BANK", 
                     "Could not detect bank from statement", 
                     null, Map.of("detection", detectionResult));
@@ -109,10 +112,33 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
             }
 
             // Step 4: Get parser and parse
+            ParserStrategy parser = parserRegistry.getParser(bankIdentifier);
+            log.info("[INGESTION:{}] Parser = {} for bank {}", 
+                ingestionId, parser != null ? parser.getParserName() : "NULL", bankIdentifier);
+            
+            if (parser == null) {
+                log.error("[INGESTION:{}] No parser found for bank: {}", ingestionId, bankIdentifier);
+                markFailed(ingestion, "PARSER_NOT_AVAILABLE", 
+                    "No parser available for bank: " + bankIdentifier,
+                    null, Map.of("bankIdentifier", bankIdentifier));
+                return;
+            }
+            
             ParserResult parserResult = parseStatement(ingestion, extractionResult.getText(), detectionResult);
+            int accountsCount = parserResult.getAccounts() != null ? parserResult.getAccounts().size() : 0;
+            int transactionsCount = parserResult.getTransactions() != null ? parserResult.getTransactions().size() : 0;
+            int snapshotsCount = parserResult.getSnapshots() != null ? parserResult.getSnapshots().size() : 0;
+            
             log.info("[INGESTION:{}] Parsing completed: {} accounts, {} transactions, {} snapshots",
-                ingestionId, parserResult.getAccounts().size(), 
-                parserResult.getTransactions().size(), parserResult.getSnapshots().size());
+                ingestionId, accountsCount, transactionsCount, snapshotsCount);
+            
+            if (transactionsCount == 0) {
+                log.warn("[INGESTION:{}] WARNING: ParserResult.transactions is EMPTY! Check parser logs for details.", 
+                    ingestionId);
+            }
+            
+            log.info("[INGESTION:{}] Snapshot parsed = {}", 
+                ingestionId, snapshotsCount > 0 ? "yes" : "no");
 
             // Step 5: Mark as PARSED
             updateStatus(ingestion, IngestionStatus.PARSED, null, null);
@@ -121,6 +147,8 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
             // Step 6: Save to database
             updateStatus(ingestion, IngestionStatus.SAVING, null, null);
             log.info("[INGESTION:{}] Status updated to SAVING", ingestionId);
+            log.info("[INGESTION:{}] Saving transactions... (count: {})", 
+                ingestionId, parserResult.getTransactions() != null ? parserResult.getTransactions().size() : 0);
 
             saveData(ingestion, parserResult, detectionResult);
 

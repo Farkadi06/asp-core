@@ -58,7 +58,7 @@ asp:
     local-base-path: ${ASP_LOCAL_STORAGE_BASE_PATH:./storage}
   ingestion:
     processor:
-      enabled: true
+      enabled: false
       poll-interval-ms: 2000
       batch-size: 5
 
