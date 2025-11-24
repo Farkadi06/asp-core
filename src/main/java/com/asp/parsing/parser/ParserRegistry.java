@@ -24,6 +24,12 @@ public class ParserRegistry {
     public void initialize() {
         log.info("Initializing parser registry with {} parsers", parserStrategies.size());
         for (ParserStrategy parser : parserStrategies) {
+            // Hard-register CIH parser if found
+            if (parser.getClass().getSimpleName().toLowerCase().contains("cih")) {
+                parsers.put("cih", parser);
+                log.info("Hard-registered CIH parser: {}", parser.getParserName());
+            }
+            
             // Register parser for each bank it can handle
             // Check common bank identifiers
             String[] bankIdentifiers = {"cih", "attijari", "bmce"};
