@@ -41,7 +41,15 @@ Welcome to the ASP Platform documentation. This directory contains comprehensive
 - Local file storage
 - Ingestion status tracking
 - Error handling
-- Processing pipeline (future)
+- Processing pipeline
+
+### 6. [Normalized Data Persistence](./06-normalized-data-persistence.md)
+- Account upsert logic
+- Transaction insertion with idempotency
+- Account snapshot creation
+- Error handling and logging
+- Testing guide
+- Database schema details
 
 ## Quick Links
 
@@ -155,9 +163,11 @@ All data is isolated by tenant using:
 ### Ingestion Statuses
 
 1. **PENDING** - Uploaded, awaiting processing
-2. **PROCESSING** - Currently being processed
-3. **COMPLETED** - Successfully processed
-4. **FAILED** - Processing failed (check error fields)
+2. **PROCESSING** - Currently being processed (text extraction, bank detection)
+3. **PARSED** - Successfully parsed (accounts, transactions extracted)
+4. **SAVING** - Writing data to database
+5. **PROCESSED** - Successfully completed (all data saved)
+6. **FAILED** - Processing failed (check error_code and error_message)
 
 ## Database Migrations
 
@@ -168,6 +178,9 @@ All migrations are in `src/main/resources/db/migration/`:
 - `V3__bank_directory_and_connection_flow.sql` - Bank directory and connections
 - `V4__add_user_ref_to_bank_connections.sql` - User reference support
 - `V5__ingestion_table.sql` - PDF ingestion pipeline
+- `V6__parser_error_table.sql` - Parser error logging
+- `V7__update_ingestion_status_constraint.sql` - Extended status values
+- `V8__normalized_accounts_transactions_snapshots.sql` - Normalized data tables
 
 ## Security Best Practices
 
@@ -240,5 +253,5 @@ For issues or questions:
 
 ---
 
-**Last Updated**: 2025-11-22
+**Last Updated**: 2025-11-24
 
