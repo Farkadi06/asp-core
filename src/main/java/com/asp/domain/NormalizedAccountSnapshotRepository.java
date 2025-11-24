@@ -18,5 +18,7 @@ public interface NormalizedAccountSnapshotRepository extends JpaRepository<Norma
     
     // Fixed: account.accountId instead of account.id
     Optional<NormalizedAccountSnapshot> findByAccount_AccountIdAndIngestionId(UUID accountId, UUID ingestionId);
+    
+    List<NormalizedAccountSnapshot> findAllByTenantIdAndAccount_AccountIdOrderByDateDesc(UUID tenantId, UUID accountId);
 }
 

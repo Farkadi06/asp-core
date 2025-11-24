@@ -1,5 +1,7 @@
 package com.asp.domain;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -57,5 +59,25 @@ public interface NormalizedTransactionRepository extends JpaRepository<Normalize
             @Param("date") LocalDate date,
             @Param("amount") BigDecimal amount,
             @Param("rawDescription") String rawDescription
+    );
+
+    @Query("""
+        SELECT t FROM NormalizedTransaction t
+        WHERE t.tenant.id = :tenantId
+          AND t.account.accountId = :accountId
+          AND (:startDate IS NULL OR t.date >= :startDate)
+          AND (:endDate IS NULL OR t.date <= :endDate)
+          AND (:category IS NULL OR t.category = :category)
+          AND (:merchant IS NULL OR t.merchant = :merchant)
+        ORDER BY t.date DESC
+        """)
+    Page<NormalizedTransaction> findFiltered(
+            @Param("tenantId") UUID tenantId,
+            @Param("accountId") UUID accountId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            @Param("category") String category,
+            @Param("merchant") String merchant,
+            Pageable pageable
     );
 }

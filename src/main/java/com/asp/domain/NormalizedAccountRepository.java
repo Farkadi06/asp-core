@@ -15,5 +15,6 @@ public interface NormalizedAccountRepository extends JpaRepository<NormalizedAcc
     List<NormalizedAccount> findAllByIngestionId(UUID ingestionId);
     Optional<NormalizedAccount> findByTenantIdAndUserRefAndAccountNumberAndBankConnectionId(
         UUID tenantId, String userRef, String accountNumber, UUID bankConnectionId);
+    Optional<NormalizedAccount> findByTenantIdAndAccountId(UUID tenantId, UUID accountId);
 }
 
