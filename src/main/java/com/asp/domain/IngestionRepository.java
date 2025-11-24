@@ -12,6 +12,7 @@ public interface IngestionRepository extends JpaRepository<Ingestion, UUID> {
     List<Ingestion> findAllByTenantId(UUID tenantId);
     List<Ingestion> findAllByTenantIdAndUserRef(UUID tenantId, String userRef);
     List<Ingestion> findAllByTenantIdAndBankConnectionId(UUID tenantId, UUID bankConnectionId);
+    List<Ingestion> findAllByStatus(IngestionStatus status);
     Optional<Ingestion> findByIdAndTenantId(UUID id, UUID tenantId);
 }
 

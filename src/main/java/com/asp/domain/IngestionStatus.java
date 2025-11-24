@@ -3,7 +3,9 @@ package com.asp.domain;
 public enum IngestionStatus {
     PENDING,
     PROCESSING,
-    COMPLETED,
+    PARSED,
+    SAVING,
+    PROCESSED,
     FAILED
 }
 
