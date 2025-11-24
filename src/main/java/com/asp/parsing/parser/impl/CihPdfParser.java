@@ -16,24 +16,41 @@ import java.util.regex.Pattern;
 
 /**
  * Parser for CIH (Crédit Immobilier et Hôtelier) PDF statements.
+ * Parses real-world CIH bank statement format with exact regex patterns.
  */
 @Component
 @Slf4j
 public class CihPdfParser implements ParserStrategy {
 
+    // RIB pattern: 3 digits + 3 digits + 16 digits + 2 digits
     private static final Pattern RIB_PATTERN = Pattern.compile("([0-9]{3})\\s+([0-9]{3})\\s+([0-9]{16})\\s+([0-9]{2})");
+    
+    // Opening balance: SOLDE DEPART AU : dd/MM/yyyy amount
     private static final Pattern OPENING_BALANCE_PATTERN = Pattern.compile(
-        "SOLDE DEPART AU\\s*:\\s*(\\d{2}/\\d{2}/\\d{4})\\s+(?:.*?\\s+)?([0-9 ]*,\\d{2})",
+        "SOLDE DEPART AU\\s*:\\s*(\\d{2}/\\d{2}/\\d{4})\\s+([0-9][0-9 \\.,]+)",
         Pattern.CASE_INSENSITIVE
     );
-    private static final Pattern TRANSACTION_PATTERN = Pattern.compile(
-        "(\\d{2}/\\d{2})\\s+" +           // Date 1 (day/month)
-        "(\\d{2}/\\d{2})\\s+" +           // Date 2 (day/month)
-        "(\\d{2}/\\d{2})\\s+" +           // Date 3 (day/month)
-        "(?:(\\d[\\d ]*,\\d{2}))?\\s*" +  // Debit (optional)
-        "(?:(\\d[\\d ]*,\\d{2}))?\\s+" +  // Credit (optional)
-        "(.+)"                             // Description
+    
+    // Transaction line: two dates (dd/MM) followed by description+amount
+    private static final Pattern TRANSACTION_LINE_PATTERN = Pattern.compile(
+        "^(\\d{2}/\\d{2})\\s+(\\d{2}/\\d{2})\\s+(.*)$"
     );
+    
+    // Description + amount: description followed by amount at end
+    private static final Pattern DESCRIPTION_AMOUNT_PATTERN = Pattern.compile(
+        "(.+?)\\s+([0-9][0-9 \\.,]+)$"
+    );
+    
+    // Debit keywords (negative amounts)
+    private static final Set<String> DEBIT_KEYWORDS = Set.of(
+        "COMMISSION", "PAIEMENT", "RECHARGE", "VIREMENT EMIS"
+    );
+    
+    // Credit keywords (positive amounts)
+    private static final Set<String> CREDIT_KEYWORDS = Set.of(
+        "VIREMENT RECU", "VIRT RECU", "VERSEMENT"
+    );
+    
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     @Override
@@ -48,23 +65,27 @@ public class CihPdfParser implements ParserStrategy {
         List<ParserWarning> warnings = new ArrayList<>();
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("parser", "CihPdfParser");
-        metadata.put("version", "1.0.0");
+        metadata.put("version", "2.0.0");
         metadata.put("textLength", extractedText.length());
 
         try {
             // 1. Parse metadata
             String currency = parseCurrency(extractedText);
             String accountNumber = parseAccountNumber(extractedText, warnings);
+            
+            // 2. Parse opening balance
             LocalDate openingDate = null;
             BigDecimal openingBalance = null;
-
+            
             Matcher openingMatcher = OPENING_BALANCE_PATTERN.matcher(extractedText);
             if (openingMatcher.find()) {
                 try {
                     String dateStr = openingMatcher.group(1);
                     openingDate = LocalDate.parse(dateStr, DATE_FORMATTER);
-                    String amountStr = openingMatcher.group(2).trim().replaceAll("\\s+", "").replace(",", ".");
-                    openingBalance = new BigDecimal(amountStr);
+                    String amountStr = openingMatcher.group(2).trim();
+                    openingBalance = parseFrenchAmount(amountStr);
+                    log.debug("[INGESTION:{}] Found opening balance: {} on {}", 
+                        context.getIngestionId(), openingBalance, openingDate);
                 } catch (DateTimeParseException e) {
                     warnings.add(ParserWarning.builder()
                         .code("INVALID_OPENING_DATE")
@@ -89,7 +110,7 @@ public class CihPdfParser implements ParserStrategy {
                 log.warn("[INGESTION:{}] Could not find opening balance line", context.getIngestionId());
             }
 
-            // 2. Parse transactions
+            // 3. Parse transactions
             List<NormalizedTransaction> transactions = parseTransactions(
                 extractedText,
                 accountNumber,
@@ -99,7 +120,7 @@ public class CihPdfParser implements ParserStrategy {
                 context
             );
 
-            // 3. Build account
+            // 4. Build account
             NormalizedAccount account = NormalizedAccount.builder()
                 .accountNumber(accountNumber)
                 .accountType("CHECKING")
@@ -107,7 +128,7 @@ public class CihPdfParser implements ParserStrategy {
                 .bankIdentifier("cih")
                 .build();
 
-            // 4. Build snapshot
+            // 5. Build snapshot
             NormalizedAccountSnapshot snapshot = null;
             if (openingDate != null && openingBalance != null) {
                 snapshot = NormalizedAccountSnapshot.builder()
@@ -123,7 +144,7 @@ public class CihPdfParser implements ParserStrategy {
                     .build();
             }
 
-            // 5. Build statement period
+            // 6. Build statement period
             DateRange statementPeriod = null;
             if (openingDate != null && !transactions.isEmpty()) {
                 LocalDate endDate = transactions.stream()
@@ -137,7 +158,8 @@ public class CihPdfParser implements ParserStrategy {
                     .build();
             }
 
-            boolean isComplete = accountNumber != null && openingDate != null && openingBalance != null;
+            boolean isComplete = accountNumber != null && !accountNumber.equals("UNKNOWN") 
+                && openingDate != null && openingBalance != null;
 
             return ParserResult.builder()
                 .accounts(List.of(account))
@@ -203,76 +225,113 @@ public class CihPdfParser implements ParserStrategy {
                 continue;
             }
 
-            Matcher matcher = TRANSACTION_PATTERN.matcher(line);
-            if (matcher.matches()) {
-                try {
-                    String date1Str = matcher.group(1);
-                    String date2Str = matcher.group(2);
-                    String date3Str = matcher.group(3);
-                    String debitStr = matcher.group(4);
-                    String creditStr = matcher.group(5);
-                    String extractedDescription = matcher.group(6).trim();
-                    String fullOriginalLine = line;  // Store full line for rawDescription
+            // Step 1: Match transaction line pattern (two dates + rest)
+            Matcher lineMatcher = TRANSACTION_LINE_PATTERN.matcher(line);
+            if (!lineMatcher.matches()) {
+                // Not a transaction line, skip
+                continue;
+            }
 
-                    // Use the first date (transaction date)
-                    LocalDate transactionDate = parseTransactionDate(date1Str, year, warnings);
-                    if (transactionDate == null) {
-                        skippedCount++;
-                        continue;
-                    }
+            try {
+                String operDateStr = lineMatcher.group(1);  // Operation date (dd/MM)
+                String valeurDateStr = lineMatcher.group(2);  // Valeur date (dd/MM)
+                String restOfLine = lineMatcher.group(3);  // Description + amount
 
-                    // Parse amount
-                    BigDecimal amount = null;
-                    NormalizedTransaction.TransactionType type = null;
-                    
-                    if (debitStr != null && !debitStr.trim().isEmpty()) {
-                        amount = parseAmount(debitStr);
-                        if (amount != null) {
-                            amount = amount.negate();  // Debit is negative
-                            type = NormalizedTransaction.TransactionType.DEBIT;
-                        }
-                    } else if (creditStr != null && !creditStr.trim().isEmpty()) {
-                        amount = parseAmount(creditStr);
-                        if (amount != null) {
-                            type = NormalizedTransaction.TransactionType.CREDIT;
-                        }
-                    }
+                // Step 2: Parse dates
+                LocalDate operDate = parseTransactionDate(operDateStr, year, warnings);
+                LocalDate valeurDate = parseTransactionDate(valeurDateStr, year, warnings);
+                
+                if (operDate == null) {
+                    skippedCount++;
+                    continue;
+                }
 
-                    if (amount == null) {
-                        warnings.add(ParserWarning.builder()
-                            .code("MISSING_AMOUNT")
-                            .message("Transaction has no debit or credit amount: " + line)
-                            .field("amount")
-                            .build());
-                        skippedCount++;
-                        continue;
-                    }
-
-                    NormalizedTransaction transaction = NormalizedTransaction.builder()
-                        .accountNumber(accountNumber)
-                        .accountType("CHECKING")
-                        .transactionDate(transactionDate)
-                        .valueDate(transactionDate)  // Use same date for value date
-                        .amount(amount)
-                        .currency(currency)
-                        .description(fullOriginalLine)  // Full original line (writer will use as rawDescription)
-                        .bankReference(null)
-                        .category(null)
-                        .balanceAfter(null)
-                        .type(type)
-                        .build();
-
-                    transactions.add(transaction);
-                    parsedCount++;
-
-                } catch (Exception e) {
-                    log.warn("[INGESTION:{}] Error parsing transaction line: {}", context.getIngestionId(), line, e);
+                // Step 3: Extract description and amount from rest of line
+                Matcher descAmountMatcher = DESCRIPTION_AMOUNT_PATTERN.matcher(restOfLine);
+                if (!descAmountMatcher.matches()) {
                     warnings.add(ParserWarning.builder()
-                        .code("TRANSACTION_PARSE_ERROR")
-                        .message("Failed to parse transaction: " + e.getMessage())
+                        .code("INVALID_TRANSACTION_FORMAT")
+                        .message("Could not extract description and amount from: " + restOfLine)
+                        .field("description")
                         .build());
                     skippedCount++;
+                    continue;
                 }
+
+                String description = descAmountMatcher.group(1).trim();
+                String amountStr = descAmountMatcher.group(2).trim();
+
+                // Step 4: Parse amount
+                BigDecimal amount = parseFrenchAmount(amountStr);
+                if (amount == null) {
+                    warnings.add(ParserWarning.builder()
+                        .code("INVALID_AMOUNT")
+                        .message("Could not parse amount: " + amountStr)
+                        .field("amount")
+                        .build());
+                    skippedCount++;
+                    continue;
+                }
+
+                // Step 5: Determine debit/credit based on keywords
+                String descriptionUpper = description.toUpperCase();
+                boolean isDebit = false;
+                
+                // Check for debit keywords
+                for (String keyword : DEBIT_KEYWORDS) {
+                    if (descriptionUpper.contains(keyword)) {
+                        isDebit = true;
+                        break;
+                    }
+                }
+                
+                // Check for credit keywords (only if not already identified as debit)
+                if (!isDebit) {
+                    for (String keyword : CREDIT_KEYWORDS) {
+                        if (descriptionUpper.contains(keyword)) {
+                            isDebit = false;
+                            break;
+                        }
+                    }
+                }
+
+                // Apply sign: debit is negative, credit is positive
+                if (isDebit) {
+                    amount = amount.negate();
+                }
+
+                NormalizedTransaction.TransactionType type = isDebit 
+                    ? NormalizedTransaction.TransactionType.DEBIT 
+                    : NormalizedTransaction.TransactionType.CREDIT;
+
+                // Step 6: Build transaction
+                NormalizedTransaction transaction = NormalizedTransaction.builder()
+                    .accountNumber(accountNumber)
+                    .accountType("CHECKING")
+                    .transactionDate(operDate)  // Operation date
+                    .valueDate(valeurDate != null ? valeurDate : operDate)  // Valeur date or fallback to oper date
+                    .amount(amount)
+                    .currency(currency)
+                    .description(line)  // Full original line for rawDescription
+                    .bankReference(null)
+                    .category(null)
+                    .balanceAfter(null)
+                    .type(type)
+                    .build();
+
+                transactions.add(transaction);
+                parsedCount++;
+
+                log.debug("[INGESTION:{}] Parsed transaction: {} {} {} {}", 
+                    context.getIngestionId(), operDate, description, amount, type);
+
+            } catch (Exception e) {
+                log.warn("[INGESTION:{}] Error parsing transaction line: {}", context.getIngestionId(), line, e);
+                warnings.add(ParserWarning.builder()
+                    .code("TRANSACTION_PARSE_ERROR")
+                    .message("Failed to parse transaction: " + e.getMessage())
+                    .build());
+                skippedCount++;
             }
         }
 
@@ -303,13 +362,17 @@ public class CihPdfParser implements ParserStrategy {
         return null;
     }
 
-    private BigDecimal parseAmount(String amountStr) {
+    /**
+     * Parses French-formatted number: removes spaces, replaces comma with dot.
+     * Example: "15 000,00" -> 15000.00, "41,00" -> 41.00
+     */
+    private BigDecimal parseFrenchAmount(String amountStr) {
         try {
-            // Remove spaces and replace comma with dot
+            // Remove all spaces and replace comma with dot
             String cleaned = amountStr.trim().replaceAll("\\s+", "").replace(",", ".");
             return new BigDecimal(cleaned);
         } catch (NumberFormatException e) {
-            log.warn("Failed to parse amount: {}", amountStr, e);
+            log.warn("Failed to parse French amount: {}", amountStr, e);
             return null;
         }
     }
