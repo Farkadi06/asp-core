@@ -2,6 +2,7 @@ package com.asp.parsing.parser.impl;
 
 import com.asp.domain.normalized.*;
 import com.asp.parsing.detection.BankDetectionResult;
+import com.asp.parsing.extraction.TextExtractionResult;
 import com.asp.parsing.parser.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -19,8 +20,11 @@ import java.util.*;
 public class BmcePdfParser implements ParserStrategy {
 
     @Override
-    public ParserResult parse(String extractedText, BankDetectionResult detection, IngestionContext context) {
-        log.info("[INGESTION:{}] Parsing BMCE statement (dummy implementation)", context.getIngestionId());
+    public ParserResult parse(TextExtractionResult extractionResult, BankDetectionResult detection, IngestionContext context) {
+        String extractedText = extractionResult != null ? extractionResult.getText() : null;
+        int pageCount = extractionResult != null ? extractionResult.getPageCount() : 0;
+        log.info("[INGESTION:{}] Parsing BMCE statement (dummy implementation, pages={})",
+            context.getIngestionId(), pageCount);
 
         // Dummy hardcoded data
         NormalizedAccount account = NormalizedAccount.builder()

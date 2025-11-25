@@ -124,7 +124,7 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
                 return;
             }
             
-            ParserResult parserResult = parseStatement(ingestion, extractionResult.getText(), detectionResult);
+            ParserResult parserResult = parseStatement(ingestion, extractionResult, detectionResult);
             int accountsCount = parserResult.getAccounts() != null ? parserResult.getAccounts().size() : 0;
             int transactionsCount = parserResult.getTransactions() != null ? parserResult.getTransactions().size() : 0;
             int snapshotsCount = parserResult.getSnapshots() != null ? parserResult.getSnapshots().size() : 0;
@@ -214,7 +214,7 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
         }
     }
 
-    private ParserResult parseStatement(Ingestion ingestion, String extractedText, 
+    private ParserResult parseStatement(Ingestion ingestion, TextExtractionResult extractionResult,
                                        BankDetectionResult detection) {
         ParserStrategy parser = parserRegistry.getParser(detection.getBankIdentifier());
         if (parser == null) {
@@ -233,7 +233,7 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
                 .bankIdentifier(detection.getBankIdentifier())
                 .build();
 
-            return parser.parse(extractedText, detection, context);
+            return parser.parse(extractionResult, detection, context);
         } catch (Exception e) {
             log.error("[INGESTION:{}] Parsing error", ingestion.getId(), e);
             markFailed(ingestion, "PARSING_ERROR", "Parsing failed: " + e.getMessage(), 

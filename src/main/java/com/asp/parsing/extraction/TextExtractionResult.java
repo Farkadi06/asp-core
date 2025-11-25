@@ -5,7 +5,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -22,5 +24,7 @@ public class TextExtractionResult {
     @Builder.Default
     private Map<String, Object> metadata = new HashMap<>();
     private boolean isScanned;  // For OCR detection
+    @Builder.Default
+    private List<String> pages = new ArrayList<>();
 }
 

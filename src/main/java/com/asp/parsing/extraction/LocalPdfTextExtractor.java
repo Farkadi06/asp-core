@@ -14,7 +14,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -51,15 +53,27 @@ public class LocalPdfTextExtractor implements PdfTextExtractor {
             }
 
             try {
-                // Extract text
-                PDFTextStripper stripper = new PDFTextStripper();
-                String text = stripper.getText(document);
                 int pageCount = document.getNumberOfPages();
+
+                // Extract full text
+                PDFTextStripper fullStripper = new PDFTextStripper();
+                String text = fullStripper.getText(document);
+
+                // Extract per-page text content
+                List<String> pages = new ArrayList<>(pageCount);
+                for (int page = 1; page <= pageCount; page++) {
+                    PDFTextStripper pageStripper = new PDFTextStripper();
+                    pageStripper.setStartPage(page);
+                    pageStripper.setEndPage(page);
+                    String pageText = pageStripper.getText(document);
+                    pages.add(pageText != null ? pageText : "");
+                }
 
                 // Build metadata
                 Map<String, Object> metadata = new HashMap<>();
                 metadata.put("fileSize", Files.size(fullPath));
                 metadata.put("pageCount", pageCount);
+                metadata.put("pagesExtracted", pages.size());
                 metadata.put("extractionMethod", "PDFBox");
 
                 // Simple heuristic: if text is very short, might be scanned
@@ -73,6 +87,7 @@ public class LocalPdfTextExtractor implements PdfTextExtractor {
                     .pageCount(pageCount)
                     .encoding("UTF-8")
                     .metadata(metadata)
+                    .pages(pages)
                     .isScanned(isScanned)
                     .build();
 

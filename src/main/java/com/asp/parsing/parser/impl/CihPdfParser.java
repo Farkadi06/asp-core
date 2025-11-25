@@ -3,6 +3,7 @@ package com.asp.parsing.parser.impl;
 import com.asp.domain.normalized.*;
 import com.asp.parsing.detection.BankDetectionResult;
 import com.asp.parsing.parser.*;
+import com.asp.parsing.extraction.TextExtractionResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -31,14 +32,13 @@ public class CihPdfParser implements ParserStrategy {
         Pattern.CASE_INSENSITIVE
     );
     
-    // Transaction line: two dates (dd/MM) followed by description+amount
+    // Transaction line patterns (merged & spaced dates) ending with French number
     private static final Pattern TRANSACTION_LINE_PATTERN = Pattern.compile(
-        "^(\\d{2}/\\d{2})\\s+(\\d{2}/\\d{2})\\s+(.*)$"
-    );
-    
-    // Description + amount: description followed by amount at end
-    private static final Pattern DESCRIPTION_AMOUNT_PATTERN = Pattern.compile(
-        "(.+?)\\s+([0-9][0-9 \\.,]+)$"
+        // Case 1 — merged dates: "01/1001/10 Description 99,00"
+        "^(\\d{2}/\\d{2})(\\d{2}/\\d{2})\\s+(.*?)(\\d[\\d\\s\\.,]+)$"
+        + "|"
+        // Case 2 — spaced dates: "01/10 01/10 Description 99,00"
+        + "^(\\d{2}/\\d{2})\\s+(\\d{2}/\\d{2})\\s+(.*?)(\\d[\\d\\s\\.,]+)$"
     );
     
     // Debit keywords (negative amounts)
@@ -54,93 +54,85 @@ public class CihPdfParser implements ParserStrategy {
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     @Override
-    public ParserResult parse(String extractedText, BankDetectionResult detection, IngestionContext context) {
+    public ParserResult parse(TextExtractionResult extractionResult, BankDetectionResult detection, IngestionContext context) {
         log.info("[CIH][INGESTION:{}] Starting CIH statement parsing", context.getIngestionId());
 
-        if (extractedText == null || extractedText.trim().isEmpty()) {
+        if (extractionResult == null || extractionResult.getText() == null || extractionResult.getText().trim().isEmpty()) {
             log.warn("[CIH][INGESTION:{}] Empty text extracted from PDF", context.getIngestionId());
             return createEmptyResult("Empty text extracted from PDF");
         }
 
-        log.info("[CIH][INGESTION:{}] Extracted text length: {} characters", 
-            context.getIngestionId(), extractedText.length());
+        String extractedText = extractionResult.getText();
+        List<String> pages = extractionResult.getPages();
+        if (pages == null || pages.isEmpty()) {
+            pages = List.of(extractedText);
+        }
+
+        log.info("[CIH][INGESTION:{}] Extracted text length: {} characters across {} pages",
+            context.getIngestionId(), extractedText.length(), pages.size());
 
         List<ParserWarning> warnings = new ArrayList<>();
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("parser", "CihPdfParser");
-        metadata.put("version", "2.0.0");
+        metadata.put("version", "3.0.0");
         metadata.put("textLength", extractedText.length());
+        metadata.put("pageCount", pages.size());
 
         try {
-            // 1. Parse metadata
             String currency = parseCurrency(extractedText);
-            String accountNumber = parseAccountNumber(extractedText, warnings);
-            
-            // 2. Parse opening balance
+            String accountNumber = null;
             LocalDate openingDate = null;
             BigDecimal openingBalance = null;
-            
-            Matcher openingMatcher = OPENING_BALANCE_PATTERN.matcher(extractedText);
-            if (openingMatcher.find()) {
-                try {
-                    String dateStr = openingMatcher.group(1);
-                    openingDate = LocalDate.parse(dateStr, DATE_FORMATTER);
-                    String amountStr = openingMatcher.group(2).trim();
-                    openingBalance = parseFrenchAmount(amountStr);
-                    log.debug("[INGESTION:{}] Found opening balance: {} on {}", 
-                        context.getIngestionId(), openingBalance, openingDate);
-                } catch (DateTimeParseException e) {
-                    warnings.add(ParserWarning.builder()
-                        .code("INVALID_OPENING_DATE")
-                        .message("Failed to parse opening balance date: " + e.getMessage())
-                        .field("openingDate")
-                        .build());
-                    log.warn("[INGESTION:{}] Failed to parse opening balance date", context.getIngestionId(), e);
-                } catch (NumberFormatException e) {
-                    warnings.add(ParserWarning.builder()
-                        .code("INVALID_OPENING_BALANCE")
-                        .message("Failed to parse opening balance amount: " + e.getMessage())
-                        .field("openingBalance")
-                        .build());
-                    log.warn("[INGESTION:{}] Failed to parse opening balance amount", context.getIngestionId(), e);
+            List<NormalizedTransaction> transactions = new ArrayList<>();
+
+            for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
+                PageType pageType = determinePageType(pageIndex, pages.size());
+                String pageText = pages.get(pageIndex) != null ? pages.get(pageIndex) : "";
+                log.info("[CIH][INGESTION:{}] Processing page {} of {} ({})",
+                    context.getIngestionId(), pageIndex + 1, pages.size(), pageType);
+
+                if (pageType == PageType.FIRST) {
+                    if (accountNumber == null) {
+                        accountNumber = parseAccountNumber(pageText, warnings);
+                    }
+                    if (openingDate == null || openingBalance == null) {
+                        OpeningBalanceResult openingResult = parseOpeningBalance(pageText, warnings, context);
+                        if (openingResult != null) {
+                            openingDate = openingResult.date();
+                            openingBalance = openingResult.balance();
+                        }
+                    }
                 }
-            } else {
-                warnings.add(ParserWarning.builder()
-                    .code("OPENING_BALANCE_NOT_FOUND")
-                    .message("Could not find opening balance line")
-                    .field("openingBalance")
-                    .build());
-                log.warn("[INGESTION:{}] Could not find opening balance line", context.getIngestionId());
+
+                List<NormalizedTransaction> pageTransactions = parseTransactionsForPage(
+                    pageText,
+                    pageType,
+                    accountNumber,
+                    currency,
+                    openingDate,
+                    warnings,
+                    context,
+                    pageIndex + 1
+                );
+                transactions.addAll(pageTransactions);
             }
 
-            // 3. Parse transactions
-            log.info("[CIH][INGESTION:{}] Starting transaction parsing...", context.getIngestionId());
-            List<NormalizedTransaction> transactions = parseTransactions(
-                extractedText,
-                accountNumber,
-                currency,
-                openingDate,
-                warnings,
-                context
-            );
-            log.info("[CIH][INGESTION:{}] Transaction parsing complete: {} transactions found", 
-                context.getIngestionId(), transactions.size());
+            if (accountNumber == null) {
+                accountNumber = "UNKNOWN";
+            }
 
             if (transactions.isEmpty()) {
-                log.warn("[CIH][INGESTION:{}] WARNING: ParserResult.transactions is EMPTY! This may indicate a parsing issue.", 
+                log.warn("[CIH][INGESTION:{}] WARNING: ParserResult.transactions is EMPTY! This may indicate a parsing issue.",
                     context.getIngestionId());
             }
 
-            // 4. Build account
             NormalizedAccount account = NormalizedAccount.builder()
                 .accountNumber(accountNumber)
                 .accountType("CHECKING")
                 .currency(currency)
                 .bankIdentifier("cih")
                 .build();
-            log.info("[CIH][INGESTION:{}] Account created: accountNumber={}", context.getIngestionId(), accountNumber);
 
-            // 5. Build snapshot
             NormalizedAccountSnapshot snapshot = null;
             if (openingDate != null && openingBalance != null) {
                 snapshot = NormalizedAccountSnapshot.builder()
@@ -148,20 +140,14 @@ public class CihPdfParser implements ParserStrategy {
                     .accountType("CHECKING")
                     .snapshotDate(openingDate)
                     .openingBalance(openingBalance)
-                    .closingBalance(null)  // Not available in CIH format
+                    .closingBalance(null)
                     .currency(currency)
                     .totalDebits(null)
                     .totalCredits(null)
                     .transactionCount(transactions.size())
                     .build();
-                log.info("[CIH][INGESTION:{}] Snapshot created: date={}, balance={}", 
-                    context.getIngestionId(), openingDate, openingBalance);
-            } else {
-                log.warn("[CIH][INGESTION:{}] No snapshot created (missing opening date or balance)", 
-                    context.getIngestionId());
             }
 
-            // 6. Build statement period
             DateRange statementPeriod = null;
             if (openingDate != null && !transactions.isEmpty()) {
                 LocalDate endDate = transactions.stream()
@@ -175,8 +161,13 @@ public class CihPdfParser implements ParserStrategy {
                     .build();
             }
 
-            boolean isComplete = accountNumber != null && !accountNumber.equals("UNKNOWN") 
-                && openingDate != null && openingBalance != null;
+            boolean isComplete = accountNumber != null
+                && !"UNKNOWN".equals(accountNumber)
+                && openingDate != null
+                && openingBalance != null;
+
+            metadata.put("pagesProcessed", pages.size());
+            metadata.put("transactionsParsed", transactions.size());
 
             return ParserResult.builder()
                 .accounts(List.of(account))
@@ -189,7 +180,7 @@ public class CihPdfParser implements ParserStrategy {
                 .build();
 
         } catch (Exception e) {
-            log.error("[INGESTION:{}] Error parsing CIH statement", context.getIngestionId(), e);
+            log.error("[CIH][INGESTION:{}] Error parsing CIH statement", context.getIngestionId(), e);
             warnings.add(ParserWarning.builder()
                 .code("PARSING_ERROR")
                 .message("Unexpected error during parsing: " + e.getMessage())
@@ -221,66 +212,103 @@ public class CihPdfParser implements ParserStrategy {
         return "UNKNOWN";  // Fallback
     }
 
-    private List<NormalizedTransaction> parseTransactions(
-            String text,
+    private List<NormalizedTransaction> parseTransactionsForPage(
+            String pageText,
+            PageType pageType,
             String accountNumber,
             String currency,
             LocalDate openingDate,
             List<ParserWarning> warnings,
-            IngestionContext context) {
-        
+            IngestionContext context,
+            int pageNumber) {
+
         List<NormalizedTransaction> transactions = new ArrayList<>();
-        String[] lines = text.split("\\r?\\n");
-        
+        if (pageText == null || pageText.trim().isEmpty()) {
+            log.warn("[CIH][INGESTION:{}] Page {} is empty, skipping", context.getIngestionId(), pageNumber);
+            return transactions;
+        }
+
+        String[] lines = pageText.split("\\r?\\n");
         int year = openingDate != null ? openingDate.getYear() : LocalDate.now().getYear();
+        boolean readyForTransactions = pageType != PageType.FIRST;
         int parsedCount = 0;
         int skippedCount = 0;
-        int lineIndex = 0;
 
-        log.info("[CIH][INGESTION:{}] Starting transaction parsing: {} total lines, year={}", 
-            context.getIngestionId(), lines.length, year);
+        log.info("[CIH][INGESTION:{}] Parsing page {} ({}) with {} lines",
+            context.getIngestionId(), pageNumber, pageType, lines.length);
 
-        for (String line : lines) {
-            lineIndex++;
-            String originalLine = line;
-            line = line.trim();
-            
-            // Log every line being scanned
-            log.debug("[CIH][line {}] RAW: \"{}\"", lineIndex, originalLine);
-            
+        for (int i = 0; i < lines.length; i++) {
+            String rawLine = lines[i];
+            String line = rawLine != null ? rawLine.trim() : "";
+
             if (line.isEmpty()) {
-                log.debug("[CIH][line {}] SKIP: Empty line", lineIndex);
                 continue;
             }
 
-            // Step 1: Match transaction line pattern (two dates + rest)
+            String upperLine = line.toUpperCase();
+
+            if (pageType == PageType.FIRST && !readyForTransactions) {
+                if (upperLine.contains("SOLDE DEPART AU")) {
+                    readyForTransactions = true;
+                }
+                continue;
+            }
+
+            if (upperLine.contains("DATES / OPER / VALEUR")) {
+                continue;
+            }
+
+            if (PAGE_NUMBER_PATTERN.matcher(line).matches()) {
+                continue;
+            }
+
+            if (upperLine.startsWith(MOVEMENT_TOTAL_PREFIX)) {
+                log.debug("[CIH][page {} line {}] Skipping movement total line", pageNumber, i + 1);
+                continue;
+            }
+
+            if (upperLine.contains("SOLDE FIN AU")) {
+                // Ignore closing balance summaries for now
+                continue;
+            }
+
             Matcher lineMatcher = TRANSACTION_LINE_PATTERN.matcher(line);
             if (!lineMatcher.matches()) {
-                // Not a transaction line, skip with warning
-                log.debug("[CIH][line {}][skip] TRANSACTION_LINE_PATTERN did not match: \"{}\"", lineIndex, line);
+                log.debug("[CIH][page {} line {}][skip] No transaction match: \"{}\"",
+                    pageNumber, i + 1, line);
                 warnings.add(ParserWarning.builder()
                     .code("NO_TX_MATCH")
-                    .message("Line does not match transaction pattern (expected: dd/MM dd/MM ...): " + line)
+                    .message("Line does not match transaction pattern: " + line)
                     .field("transactionLine")
                     .build());
                 skippedCount++;
                 continue;
             }
 
-            // Log successful match
-            String operDateStr = lineMatcher.group(1);
-            String valeurDateStr = lineMatcher.group(2);
-            String restOfLine = lineMatcher.group(3);
-            log.debug("[CIH][line {}][match] TRANSACTION_LINE_PATTERN matched: oper={} valeur={} rest=\"{}\"", 
-                lineIndex, operDateStr, valeurDateStr, restOfLine);
+            String operDateStr;
+            String valeurDateStr;
+            String descriptionPart;
+            String amountStr;
+
+            if (lineMatcher.group(1) != null) {
+                // Merged format
+                operDateStr = lineMatcher.group(1);
+                valeurDateStr = lineMatcher.group(2);
+                descriptionPart = lineMatcher.group(3);
+                amountStr = lineMatcher.group(4);
+            } else {
+                // Spaced format
+                operDateStr = lineMatcher.group(5);
+                valeurDateStr = lineMatcher.group(6);
+                descriptionPart = lineMatcher.group(7);
+                amountStr = lineMatcher.group(8);
+            }
 
             try {
-                // Step 2: Parse dates
                 LocalDate operDate = parseTransactionDate(operDateStr, year, warnings);
                 LocalDate valeurDate = parseTransactionDate(valeurDateStr, year, warnings);
-                
+
                 if (operDate == null) {
-                    log.warn("[CIH][line {}][skip] Failed to parse operation date: {}", lineIndex, operDateStr);
                     warnings.add(ParserWarning.builder()
                         .code("INVALID_DATE")
                         .message("Failed to parse operation date: " + operDateStr)
@@ -290,29 +318,12 @@ public class CihPdfParser implements ParserStrategy {
                     continue;
                 }
 
-                // Step 3: Extract description and amount from rest of line
-                Matcher descAmountMatcher = DESCRIPTION_AMOUNT_PATTERN.matcher(restOfLine);
-                if (!descAmountMatcher.matches()) {
-                    log.warn("[CIH][line {}][skip] DESCRIPTION_AMOUNT_PATTERN did not match: \"{}\"", lineIndex, restOfLine);
-                    warnings.add(ParserWarning.builder()
-                        .code("INVALID_TRANSACTION_FORMAT")
-                        .message("Could not extract description and amount from: " + restOfLine)
-                        .field("description")
-                        .build());
-                    skippedCount++;
-                    continue;
-                }
+                String description = descriptionPart != null ? descriptionPart.trim() : "";
+                log.debug("[CIH][page {} line {}][amount] desc=\"{}\" amountStr=\"{}\"",
+                    pageNumber, i + 1, description, amountStr);
 
-                String description = descAmountMatcher.group(1).trim();
-                String amountStr = descAmountMatcher.group(2).trim();
-                
-                log.debug("[CIH][line {}][amount] desc=\"{}\" amountStr=\"{}\"", 
-                    lineIndex, description, amountStr);
-
-                // Step 4: Parse amount
                 BigDecimal amount = parseFrenchAmount(amountStr);
                 if (amount == null) {
-                    log.warn("[CIH][line {}][skip] Failed to parse amount: \"{}\"", lineIndex, amountStr);
                     warnings.add(ParserWarning.builder()
                         .code("INVALID_AMOUNT")
                         .message("Could not parse amount: " + amountStr)
@@ -322,49 +333,23 @@ public class CihPdfParser implements ParserStrategy {
                     continue;
                 }
 
-                // Step 5: Determine debit/credit based on keywords
-                String descriptionUpper = description.toUpperCase();
-                boolean isDebit = false;
-                
-                // Check for debit keywords
-                for (String keyword : DEBIT_KEYWORDS) {
-                    if (descriptionUpper.contains(keyword)) {
-                        isDebit = true;
-                        log.debug("[CIH][line {}][keyword] Found debit keyword: \"{}\"", lineIndex, keyword);
-                        break;
-                    }
+                BigDecimal finalAmount = determineSignedAmount(description, amount);
+                if (finalAmount == null) {
+                    skippedCount++;
+                    continue;
                 }
-                
-                // Check for credit keywords (only if not already identified as debit)
-                if (!isDebit) {
-                    for (String keyword : CREDIT_KEYWORDS) {
-                        if (descriptionUpper.contains(keyword)) {
-                            isDebit = false;
-                            log.debug("[CIH][line {}][keyword] Found credit keyword: \"{}\"", lineIndex, keyword);
-                            break;
-                        }
-                    }
-                }
+                NormalizedTransaction.TransactionType type = finalAmount.signum() >= 0
+                    ? NormalizedTransaction.TransactionType.CREDIT
+                    : NormalizedTransaction.TransactionType.DEBIT;
 
-                // Apply sign: debit is negative, credit is positive
-                BigDecimal finalAmount = amount;
-                if (isDebit) {
-                    finalAmount = amount.negate();
-                }
-
-                NormalizedTransaction.TransactionType type = isDebit 
-                    ? NormalizedTransaction.TransactionType.DEBIT 
-                    : NormalizedTransaction.TransactionType.CREDIT;
-
-                // Step 6: Build transaction
                 NormalizedTransaction transaction = NormalizedTransaction.builder()
                     .accountNumber(accountNumber)
                     .accountType("CHECKING")
-                    .transactionDate(operDate)  // Operation date
-                    .valueDate(valeurDate != null ? valeurDate : operDate)  // Valeur date or fallback to oper date
+                    .transactionDate(operDate)
+                    .valueDate(valeurDate != null ? valeurDate : operDate)
                     .amount(finalAmount)
                     .currency(currency)
-                    .description(line)  // Full original line for rawDescription
+                    .description(rawLine.trim())
                     .bankReference(null)
                     .category(null)
                     .balanceAfter(null)
@@ -374,12 +359,12 @@ public class CihPdfParser implements ParserStrategy {
                 transactions.add(transaction);
                 parsedCount++;
 
-                log.info("[CIH][line {}][tx] Parsed -> date={}, amount={}, description=\"{}\", type={}", 
-                    lineIndex, operDate, finalAmount, description, type);
+                log.info("[CIH][page {} line {}][tx] Parsed -> date={}, amount={}, description=\"{}\", type={}",
+                    pageNumber, i + 1, operDate, finalAmount, description, type);
 
             } catch (Exception e) {
-                log.error("[CIH][line {}][ERROR] Exception parsing transaction line: \"{}\"", 
-                    lineIndex, line, e);
+                log.error("[CIH][page {} line {}][ERROR] Exception parsing transaction line: \"{}\"",
+                    pageNumber, i + 1, line, e);
                 warnings.add(ParserWarning.builder()
                     .code("TRANSACTION_PARSE_ERROR")
                     .message("Failed to parse transaction: " + e.getMessage())
@@ -388,14 +373,8 @@ public class CihPdfParser implements ParserStrategy {
             }
         }
 
-        log.info("[CIH][INGESTION:{}] Transaction parsing complete: {} parsed, {} skipped, {} warnings", 
-            context.getIngestionId(), parsedCount, skippedCount, warnings.size());
-        
-        if (parsedCount == 0) {
-            log.warn("[CIH][INGESTION:{}] WARNING: No transactions were parsed! Total lines scanned: {}", 
-                context.getIngestionId(), lines.length);
-        }
-
+        log.info("[CIH][INGESTION:{}] Page {} parsed: {} transactions, {} skipped",
+            context.getIngestionId(), pageNumber, parsedCount, skippedCount);
         return transactions;
     }
 
@@ -428,6 +407,40 @@ public class CihPdfParser implements ParserStrategy {
         }
     }
 
+    private BigDecimal determineSignedAmount(String description, BigDecimal amount) {
+        if (amount == null) {
+            return null;
+        }
+
+        String upperDescription = description != null ? description.toUpperCase() : "";
+
+        for (String keyword : CREDIT_KEYWORDS) {
+            if (upperDescription.contains(keyword)) {
+                return amount.abs();
+            }
+        }
+
+        for (String keyword : DEBIT_KEYWORDS) {
+            if (upperDescription.contains(keyword)) {
+                return amount.negate();
+            }
+        }
+
+        // Default to negative (most transactions are debits)
+        return amount.negate();
+    }
+
+    private enum PageType {
+        FIRST,
+        MIDDLE,
+        LAST
+    }
+
+    private record OpeningBalanceResult(LocalDate date, BigDecimal balance) {}
+
+    private static final Pattern PAGE_NUMBER_PATTERN = Pattern.compile("^\\d{1,4}/\\d{1,4}$");
+    private static final String MOVEMENT_TOTAL_PREFIX = "REPORT TOTAL MOUVEMENT";
+
     private ParserResult createEmptyResult(String reason) {
         return ParserResult.builder()
             .accounts(new ArrayList<>())
@@ -439,6 +452,53 @@ public class CihPdfParser implements ParserStrategy {
                 .build()))
             .isComplete(false)
             .build();
+    }
+
+    private PageType determinePageType(int index, int totalPages) {
+        if (index == 0) {
+            return PageType.FIRST;
+        }
+        if (index == totalPages - 1) {
+            return PageType.LAST;
+        }
+        return PageType.MIDDLE;
+    }
+
+    private OpeningBalanceResult parseOpeningBalance(String pageText, List<ParserWarning> warnings, IngestionContext context) {
+        Matcher openingMatcher = OPENING_BALANCE_PATTERN.matcher(pageText != null ? pageText : "");
+        if (openingMatcher.find()) {
+            try {
+                String dateStr = openingMatcher.group(1);
+                LocalDate openingDate = LocalDate.parse(dateStr, DATE_FORMATTER);
+                String amountStr = openingMatcher.group(2).trim();
+                BigDecimal openingBalance = parseFrenchAmount(amountStr);
+                log.debug("[CIH][INGESTION:{}] Found opening balance: {} on {}",
+                    context.getIngestionId(), openingBalance, openingDate);
+                return new OpeningBalanceResult(openingDate, openingBalance);
+            } catch (DateTimeParseException e) {
+                warnings.add(ParserWarning.builder()
+                    .code("INVALID_OPENING_DATE")
+                    .message("Failed to parse opening balance date: " + e.getMessage())
+                    .field("openingDate")
+                    .build());
+                log.warn("[CIH][INGESTION:{}] Failed to parse opening balance date", context.getIngestionId(), e);
+            } catch (NumberFormatException e) {
+                warnings.add(ParserWarning.builder()
+                    .code("INVALID_OPENING_BALANCE")
+                    .message("Failed to parse opening balance amount: " + e.getMessage())
+                    .field("openingBalance")
+                    .build());
+                log.warn("[CIH][INGESTION:{}] Failed to parse opening balance amount", context.getIngestionId(), e);
+            }
+        } else {
+            warnings.add(ParserWarning.builder()
+                .code("OPENING_BALANCE_NOT_FOUND")
+                .message("Could not find opening balance line on first page")
+                .field("openingBalance")
+                .build());
+            log.warn("[CIH][INGESTION:{}] Could not find opening balance line on first page", context.getIngestionId());
+        }
+        return null;
     }
 
     @Override

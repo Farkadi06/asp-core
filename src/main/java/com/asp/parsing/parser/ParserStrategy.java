@@ -1,6 +1,7 @@
 package com.asp.parsing.parser;
 
 import com.asp.parsing.detection.BankDetectionResult;
+import com.asp.parsing.extraction.TextExtractionResult;
 
 import java.util.Set;
 
@@ -11,12 +12,12 @@ public interface ParserStrategy {
     /**
      * Parses extracted text and returns structured data.
      *
-     * @param extractedText the extracted text from PDF
+     * @param extractionResult the extracted text and per-page breakdown
      * @param detection the bank detection result
      * @param context the ingestion context
      * @return the parsing result
      */
-    ParserResult parse(String extractedText, BankDetectionResult detection, IngestionContext context);
+    ParserResult parse(TextExtractionResult extractionResult, BankDetectionResult detection, IngestionContext context);
 
     /**
      * Checks if this parser can handle the given bank identifier.
