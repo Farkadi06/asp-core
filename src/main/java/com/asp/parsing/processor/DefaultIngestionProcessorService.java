@@ -15,6 +15,8 @@ import com.asp.parsing.parser.ParserRegistry;
 import com.asp.parsing.parser.ParserResult;
 import com.asp.parsing.parser.ParserStrategy;
 import com.asp.parsing.writer.TransactionWriter;
+import com.asp.platform.enrichment.service.EnrichmentProcessor;
+import com.asp.platform.enrichment.service.EnrichmentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -41,6 +43,7 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
     private final ParserRegistry parserRegistry;
     private final TransactionWriter transactionWriter;
     private final ParserErrorLogger errorLogger;
+    private final EnrichmentProcessor enrichmentProcessor;
 
     @Value("${asp.ingestion.processor.batch-size:5}")
     private int batchSize;
@@ -151,6 +154,10 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
                 ingestionId, parserResult.getTransactions() != null ? parserResult.getTransactions().size() : 0);
 
             saveData(ingestion, parserResult, detectionResult);
+            EnrichmentService.EnrichmentResult enrichmentResult =
+                enrichmentProcessor.processIngestion(ingestion.getId(), ingestion.getTenant().getId());
+            log.info("[INGESTION:{}] Enrichment persisted {} rows (from {} normalized)",
+                ingestionId, enrichmentResult.enrichedCount(), enrichmentResult.normalizedCount());
 
             // Step 7: Mark as PROCESSED
             ingestion.setStatus(IngestionStatus.PROCESSED);

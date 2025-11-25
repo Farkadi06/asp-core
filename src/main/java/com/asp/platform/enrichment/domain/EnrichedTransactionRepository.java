@@ -10,5 +10,7 @@ import java.util.UUID;
 public interface EnrichedTransactionRepository extends JpaRepository<EnrichedTransaction, UUID> {
 
     List<EnrichedTransaction> findAllByTenantIdAndNormalizedTransaction_TransactionIdIn(UUID tenantId, List<UUID> ids);
+
+    void deleteByNormalizedTransaction_Ingestion_Id(UUID ingestionId);
 }
 
