@@ -1,0 +1,16 @@
+[
+  { "pattern": "GLOVO", "category": "Food Delivery", "subcategory": "Glovo", "priority": 100 },
+  { "pattern": "CARREFOUR", "category": "Food & Groceries", "subcategory": "Carrefour", "priority": 90 },
+  { "pattern": "PLANET SPORT", "category": "Shopping", "subcategory": "Sportswear", "priority": 90 },
+  { "pattern": "NETFLIX", "category": "Subscriptions", "subcategory": "Netflix", "priority": 100 },
+  { "pattern": "SPOTIFY", "category": "Subscriptions", "subcategory": "Spotify", "priority": 100 },
+  { "pattern": "APPLE\\.COM", "category": "Subscriptions", "subcategory": "Apple", "priority": 80 },
+  { "pattern": "RECHARGE", "category": "Telecom & Recharge", "subcategory": "Recharge", "priority": 80 },
+  { "pattern": "INWI", "category": "Telecom & Recharge", "subcategory": "Inwi", "priority": 90 },
+  { "pattern": "RETRAIT CARTE", "category": "Cash Withdrawal", "subcategory": "ATM", "priority": 100 },
+  { "pattern": "VIREMENT RECU", "category": "Transfers In", "subcategory": "Bank Transfer", "priority": 100 },
+  { "pattern": "VIREMENT EMIS", "category": "Transfers Out", "subcategory": "Bank Transfer", "priority": 100 },
+  { "pattern": "FRAIS", "category": "Bank Fees", "subcategory": "Fees", "priority": 100 },
+  { "pattern": "AGIOS", "category": "Bank Fees", "subcategory": "Agios", "priority": 100 }
+]
+

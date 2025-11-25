@@ -2,6 +2,9 @@ package com.asp.platform.enrichment.mapper;
 
 import com.asp.domain.NormalizedAccount;
 import com.asp.domain.NormalizedTransaction;
+import com.asp.domain.NormalizedTransaction;
+import com.asp.platform.enrichment.category.CategoryClassificationResult;
+import com.asp.platform.enrichment.category.CategoryClassifierService;
 import com.asp.platform.enrichment.domain.EnrichedTransaction;
 import org.springframework.stereotype.Component;
 
@@ -10,6 +13,12 @@ import java.util.HashMap;
 
 @Component
 public class EnrichedTransactionMapper {
+
+    private final CategoryClassifierService categoryClassifierService;
+
+    public EnrichedTransactionMapper(CategoryClassifierService categoryClassifierService) {
+        this.categoryClassifierService = categoryClassifierService;
+    }
 
     public EnrichedTransaction fromNormalizedTransaction(NormalizedTransaction normalizedTransaction) {
         if (normalizedTransaction == null) {
@@ -30,6 +39,8 @@ public class EnrichedTransactionMapper {
         BigDecimal amount = normalizedTransaction.getAmount();
         BigDecimal absoluteAmount = amount != null ? amount.abs() : BigDecimal.ZERO;
 
+        CategoryClassificationResult classification = categoryClassifierService.classify(rawDescription);
+
         return EnrichedTransaction.builder()
             .normalizedTransaction(normalizedTransaction)
             .tenantId(normalizedTransaction.getTenant().getId())
@@ -38,8 +49,8 @@ public class EnrichedTransactionMapper {
             .txnDate(normalizedTransaction.getDate())
             .descriptionRaw(rawDescription)
             .descriptionClean(null)
-            .category(null)
-            .subcategory(null)
+            .category(classification.getCategory())
+            .subcategory(classification.getSubcategory())
             .merchantName(null)
             .merchantNormalized(null)
             .salary(false)
@@ -49,8 +60,15 @@ public class EnrichedTransactionMapper {
             .amount(amount)
             .amountAbs(absoluteAmount)
             .currency(normalizedTransaction.getCurrency())
-            .metadata(new HashMap<>())
+            .metadata(buildMetadata(classification))
             .build();
+    }
+
+    private HashMap<String, Object> buildMetadata(CategoryClassificationResult classification) {
+        HashMap<String, Object> metadata = new HashMap<>();
+        metadata.put("category_pattern", classification.getMatchedPattern());
+        metadata.put("category_confidence", classification.getConfidence().name());
+        return metadata;
     }
 }
 
