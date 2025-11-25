@@ -2,10 +2,10 @@ package com.asp.platform.enrichment.mapper;
 
 import com.asp.domain.NormalizedAccount;
 import com.asp.domain.NormalizedTransaction;
-import com.asp.domain.NormalizedTransaction;
 import com.asp.platform.enrichment.category.CategoryClassificationResult;
 import com.asp.platform.enrichment.category.CategoryClassifierService;
 import com.asp.platform.enrichment.domain.EnrichedTransaction;
+import com.asp.platform.enrichment.merchant.MerchantNormalizationService;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -15,9 +15,12 @@ import java.util.HashMap;
 public class EnrichedTransactionMapper {
 
     private final CategoryClassifierService categoryClassifierService;
+    private final MerchantNormalizationService merchantNormalizationService;
 
-    public EnrichedTransactionMapper(CategoryClassifierService categoryClassifierService) {
+    public EnrichedTransactionMapper(CategoryClassifierService categoryClassifierService,
+                                     MerchantNormalizationService merchantNormalizationService) {
         this.categoryClassifierService = categoryClassifierService;
+        this.merchantNormalizationService = merchantNormalizationService;
     }
 
     public EnrichedTransaction fromNormalizedTransaction(NormalizedTransaction normalizedTransaction) {
@@ -40,6 +43,8 @@ public class EnrichedTransactionMapper {
         BigDecimal absoluteAmount = amount != null ? amount.abs() : BigDecimal.ZERO;
 
         CategoryClassificationResult classification = categoryClassifierService.classify(rawDescription);
+        String cleanedMerchant = merchantNormalizationService.cleanMerchant(rawDescription);
+        String normalizedMerchant = merchantNormalizationService.normalizeMerchant(cleanedMerchant);
 
         return EnrichedTransaction.builder()
             .normalizedTransaction(normalizedTransaction)
@@ -51,8 +56,8 @@ public class EnrichedTransactionMapper {
             .descriptionClean(null)
             .category(classification.getCategory())
             .subcategory(classification.getSubcategory())
-            .merchantName(null)
-            .merchantNormalized(null)
+            .merchantName(cleanedMerchant)
+            .merchantNormalized(normalizedMerchant)
             .salary(false)
             .recurring(false)
             .recurringGroupId(null)
@@ -60,14 +65,16 @@ public class EnrichedTransactionMapper {
             .amount(amount)
             .amountAbs(absoluteAmount)
             .currency(normalizedTransaction.getCurrency())
-            .metadata(buildMetadata(classification))
+            .metadata(buildMetadata(classification, normalizedMerchant))
             .build();
     }
 
-    private HashMap<String, Object> buildMetadata(CategoryClassificationResult classification) {
+    private HashMap<String, Object> buildMetadata(CategoryClassificationResult classification,
+                                                  String normalizedMerchant) {
         HashMap<String, Object> metadata = new HashMap<>();
         metadata.put("category_pattern", classification.getMatchedPattern());
         metadata.put("category_confidence", classification.getConfidence().name());
+        metadata.put("merchant_normalized", normalizedMerchant);
         return metadata;
     }
 }

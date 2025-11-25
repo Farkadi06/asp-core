@@ -1,0 +1,9 @@
+ignore_tokens:
+  - "SUPERMARCHE"
+  - "HYPER"
+
+merchant_aliases:
+  marjane:
+    - "marjane_market"
+    - "marjane_hyper"
+
