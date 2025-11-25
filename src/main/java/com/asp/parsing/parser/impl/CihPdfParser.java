@@ -241,34 +241,46 @@ public class CihPdfParser implements ParserStrategy {
             String rawLine = lines[i];
             String line = rawLine != null ? rawLine.trim() : "";
 
+            // Log raw line before processing
+            log.debug("[CIH][page {} line {}] RAW: \"{}\"", pageNumber, i + 1, rawLine);
+
             if (line.isEmpty()) {
+                log.debug("[CIH][page {} line {}] SKIPPED: Empty line", pageNumber, i + 1);
                 continue;
             }
 
             String upperLine = line.toUpperCase();
 
+            // Skip header lines before transactions start (first page only)
             if (pageType == PageType.FIRST && !readyForTransactions) {
                 if (upperLine.contains("SOLDE DEPART AU")) {
                     readyForTransactions = true;
+                    log.debug("[CIH][page {} line {}] Found opening balance marker, ready for transactions", pageNumber, i + 1);
                 }
+                log.debug("[CIH][page {} line {}] SKIPPED HEADER: Before opening balance", pageNumber, i + 1);
                 continue;
             }
 
-            if (upperLine.contains("DATES / OPER / VALEUR")) {
-                continue;
-            }
-
+            // Skip known header/footer patterns
+            boolean shouldSkip = false;
+            String skipReason = null;
+            
             if (PAGE_NUMBER_PATTERN.matcher(line).matches()) {
-                continue;
+                shouldSkip = true;
+                skipReason = "Page number pattern";
+            } else {
+                for (String pattern : SKIP_PATTERNS) {
+                    if (upperLine.contains(pattern.toUpperCase())) {
+                        shouldSkip = true;
+                        skipReason = "Header/footer pattern: " + pattern;
+                        break;
+                    }
+                }
             }
-
-            if (upperLine.startsWith(MOVEMENT_TOTAL_PREFIX)) {
-                log.debug("[CIH][page {} line {}] Skipping movement total line", pageNumber, i + 1);
-                continue;
-            }
-
-            if (upperLine.contains("SOLDE FIN AU")) {
-                // Ignore closing balance summaries for now
+            
+            if (shouldSkip) {
+                log.debug("[CIH][page {} line {}] SKIPPED HEADER: {} - \"{}\"", 
+                    pageNumber, i + 1, skipReason, line);
                 continue;
             }
 
@@ -356,11 +368,17 @@ public class CihPdfParser implements ParserStrategy {
                     .type(type)
                     .build();
 
+                // ALWAYS add transaction - NO DEDUPLICATION
+                // CIH statements can contain legitimate duplicates (e.g., multiple identical mobile recharges)
                 transactions.add(transaction);
                 parsedCount++;
 
-                log.info("[CIH][page {} line {}][tx] Parsed -> date={}, amount={}, description=\"{}\", type={}",
-                    pageNumber, i + 1, operDate, finalAmount, description, type);
+                log.info("[CIH][page {} line {}] ADDED TRANSACTION -> date={}, amount={}, description=\"{}\", type={}",
+                    pageNumber, i + 1, operDate, finalAmount, 
+                    description.length() > 60 ? description.substring(0, 60) + "..." : description, 
+                    type);
+                log.debug("[CIH][page {} line {}] Final cleaned transaction line: \"{}\"",
+                    pageNumber, i + 1, rawLine.trim());
 
             } catch (Exception e) {
                 log.error("[CIH][page {} line {}][ERROR] Exception parsing transaction line: \"{}\"",
@@ -439,7 +457,24 @@ public class CihPdfParser implements ParserStrategy {
     private record OpeningBalanceResult(LocalDate date, BigDecimal balance) {}
 
     private static final Pattern PAGE_NUMBER_PATTERN = Pattern.compile("^\\d{1,4}/\\d{1,4}$");
-    private static final String MOVEMENT_TOTAL_PREFIX = "REPORT TOTAL MOUVEMENT";
+    
+    // Header/footer patterns to skip (case-insensitive)
+    private static final List<String> SKIP_PATTERNS = List.of(
+        "REPORT TOTAL MOUVEMENT",
+        "Report total mouvement",
+        "RELEVE",
+        "Releve",
+        "TOTAL CREDIT",
+        "TOTAL DEBIT",
+        "Total credit",
+        "Total debit",
+        "SOLDE FIN AU",
+        "Solde fin au",
+        "SOLDE DEPART AU",
+        "Solde depart au",
+        "DATES / OPER / VALEUR",
+        "DATES/OPER/VALEUR"
+    );
 
     private ParserResult createEmptyResult(String reason) {
         return ParserResult.builder()

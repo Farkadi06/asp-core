@@ -14,7 +14,6 @@ import com.asp.parsing.parser.ParserResult;
 import com.asp.parsing.error.ParserErrorLogger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -223,20 +222,14 @@ public class DefaultTransactionWriter implements TransactionWriter {
             }
 
             String rawDescription = defaultRawDescription(transaction.getDescription());
-            boolean exists = transactionRepository
-                .findByAccountIdAndIngestionIdAndDateAndAmountAndRawDescription(
-                    accountEntity.getAccountId(),
-                    ingestion.getId(),
-                    transactionDate,
-                    amount,
-                    rawDescription
-                ).isPresent();
 
-            if (exists) {
-                log.debug("[INGESTION:{}] Skipping duplicate transaction for account {} on {}", 
-                    context.getIngestionId(), accountNumber, transactionDate);
-                continue;
-            }
+            // NO DEDUPLICATION: Allow legitimate duplicate transactions from the same statement
+            // CIH statements can contain genuine duplicates (e.g., multiple identical mobile recharges)
+            // Each transaction row from the PDF must result in one database insert
+            
+            log.debug("[INGESTION:{}] Adding transaction: account={}, date={}, amount={}, description=\"{}\"",
+                context.getIngestionId(), accountNumber, transactionDate, amount, 
+                transaction.getDescription() != null ? transaction.getDescription().substring(0, Math.min(50, transaction.getDescription().length())) : "");
 
             com.asp.domain.NormalizedTransaction transactionEntity = com.asp.domain.NormalizedTransaction.builder()
                 .ingestion(ingestion)
@@ -254,10 +247,14 @@ public class DefaultTransactionWriter implements TransactionWriter {
 
             try {
                 transactionRepository.save(transactionEntity);
-            } catch (DataIntegrityViolationException e) {
-                // Treat as duplicate and continue
-                log.debug("[INGESTION:{}] Duplicate transaction detected for account {} on {}",
-                    context.getIngestionId(), accountNumber, transactionDate);
+                log.debug("[INGESTION:{}] Successfully saved transaction: account={}, date={}, amount={}",
+                    context.getIngestionId(), accountNumber, transactionDate, amount);
+            } catch (Exception e) {
+                log.error("[INGESTION:{}] Failed to save transaction for account {} on {}",
+                    context.getIngestionId(), accountNumber, transactionDate, e);
+                parserErrorLogger.logError(ingestion, ParserError.ErrorCategory.STORAGE_ERROR,
+                    "TRANSACTION_SAVE_FAILED", "Failed to save transaction: " + e.getMessage(),
+                    e, Map.of("accountNumber", accountNumber, "transactionDate", transactionDate.toString()));
             }
         }
     }
