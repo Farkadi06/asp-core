@@ -1,5 +1,6 @@
 package com.asp.parsing.error;
 
+import com.asp.common.Constants;
 import com.asp.domain.Ingestion;
 import com.asp.domain.ParserError;
 import com.asp.domain.ParserErrorRepository;
@@ -35,8 +36,8 @@ public class ParserErrorLogger {
     public void logError(Ingestion ingestion, ParserError.ErrorCategory category, 
                         String errorCode, String errorMessage, Throwable throwable, 
                         Map<String, Object> context) {
-        log.error("[INGESTION:{}] [ERROR:{}] {}: {}", 
-            ingestion.getId(), errorCode, category, errorMessage, throwable);
+        log.error("{}[{}] [ERROR:{}] {}: {}", 
+            Constants.LOG_PREFIX_INGESTION, ingestion.getId(), errorCode, category, errorMessage, throwable);
 
         String stackTrace = null;
         if (throwable != null) {

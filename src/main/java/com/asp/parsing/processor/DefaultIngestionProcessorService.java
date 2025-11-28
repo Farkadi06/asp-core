@@ -1,14 +1,12 @@
 package com.asp.parsing.processor;
 
+import com.asp.common.Constants;
 import com.asp.domain.Ingestion;
 import com.asp.domain.IngestionRepository;
 import com.asp.domain.IngestionStatus;
-import com.asp.parsing.detection.BankDetector;
-import com.asp.parsing.detection.BankDetectionResult;
 import com.asp.domain.ParserError;
+import com.asp.parsing.detection.BankDetectionResult;
 import com.asp.parsing.error.ParserErrorLogger;
-import com.asp.parsing.extraction.PdfExtractionException;
-import com.asp.parsing.extraction.PdfTextExtractor;
 import com.asp.parsing.extraction.TextExtractionResult;
 import com.asp.parsing.parser.IngestionContext;
 import com.asp.parsing.parser.ParserRegistry;
@@ -17,13 +15,16 @@ import com.asp.parsing.parser.ParserStrategy;
 import com.asp.parsing.writer.TransactionWriter;
 import com.asp.platform.enrichment.service.EnrichmentProcessor;
 import com.asp.platform.enrichment.service.EnrichmentService;
+import com.asp.service.processing.BankDetectionService;
+import com.asp.service.processing.IngestionStatusManager;
+import com.asp.service.processing.StatementParsingService;
+import com.asp.service.processing.TextExtractionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -38,12 +39,14 @@ import java.util.UUID;
 public class DefaultIngestionProcessorService implements IngestionProcessorService {
 
     private final IngestionRepository ingestionRepository;
-    private final PdfTextExtractor pdfTextExtractor;
-    private final BankDetector bankDetector;
+    private final TextExtractionService textExtractionService;
+    private final BankDetectionService bankDetectionService;
+    private final StatementParsingService statementParsingService;
     private final ParserRegistry parserRegistry;
     private final TransactionWriter transactionWriter;
     private final ParserErrorLogger errorLogger;
     private final EnrichmentProcessor enrichmentProcessor;
+    private final IngestionStatusManager statusManager;
 
     @Value("${asp.ingestion.processor.batch-size:5}")
     private int batchSize;
@@ -69,7 +72,7 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
             try {
                 processIngestion(ingestion.getId());
             } catch (Exception e) {
-                log.error("[INGESTION:{}] Error processing ingestion in batch", ingestion.getId(), e);
+                log.error("{}[{}] Error processing ingestion in batch", Constants.LOG_PREFIX_INGESTION, ingestion.getId(), e);
                 // Continue with next ingestion
             }
         }
@@ -78,68 +81,137 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
     @Override
     @Transactional
     public void processIngestion(UUID ingestionId) {
-        log.info("[PROCESS] Starting ingestion processing id={}", ingestionId);
+        log.info("{} Starting ingestion processing id={}", Constants.LOG_PREFIX_PROCESS, ingestionId);
 
         Ingestion ingestion = ingestionRepository.findById(ingestionId)
             .orElseThrow(() -> new IllegalArgumentException("Ingestion not found: " + ingestionId));
 
-        if (ingestion.getStatus() != IngestionStatus.PENDING && ingestion.getStatus() != IngestionStatus.FAILED) {
-            log.warn("[PROCESS][INGESTION:{}] Ingestion is not in PENDING or FAILED state: {}", 
-                ingestionId, ingestion.getStatus());
+        if (!statusManager.canProcess(ingestion)) {
+            log.warn("{}[{}] Ingestion is not in PENDING or FAILED state: {}", 
+                Constants.LOG_PREFIX_PROCESS, ingestionId, ingestion.getStatus());
             return;
         }
 
         try {
             // Step 1: Mark as PROCESSING
-            updateStatus(ingestion, IngestionStatus.PROCESSING, null, null);
-            log.info("[INGESTION:{}] Status updated to PROCESSING", ingestionId);
+            statusManager.updateStatus(ingestion, IngestionStatus.PROCESSING, null, null);
 
             // Step 2: Extract text from PDF
-            TextExtractionResult extractionResult = extractText(ingestion);
-            int textLength = extractionResult.getText() != null ? extractionResult.getText().length() : 0;
-            log.info("[PROCESS] Extracted text: {} chars", textLength);
+            TextExtractionResult extractionResult = textExtractionService.extractText(ingestion);
 
             // Step 3: Detect bank
-            BankDetectionResult detectionResult = detectBank(ingestion, extractionResult.getText());
+            BankDetectionResult detectionResult = bankDetectionService.detectBank(ingestion, extractionResult.getText());
             String bankIdentifier = detectionResult.getBankIdentifier();
-            log.info("[PROCESS] Bank detected = {} (confidence: {})",
-                bankIdentifier, detectionResult.getConfidence());
+            BankDetectionResult.DetectionConfidence confidence = detectionResult.getConfidence();
+            Map<String, Object> metadata = detectionResult.getMetadata();
 
-            if (bankIdentifier == null) {
-                log.error("[INGESTION:{}] Bank detection failed - bank identifier is null", ingestionId);
-                markFailed(ingestion, "DETECTION_UNKNOWN_BANK", 
-                    "Could not detect bank from statement", 
+            // Validation 1: Check if bank identifier is null or invalid
+            if (bankIdentifier == null || bankIdentifier.trim().isEmpty()) {
+                log.error("{}[{}][DETECTION] Bank detection failed - bank identifier is null or empty", 
+                    Constants.LOG_PREFIX_PROCESS, ingestionId);
+                markFailed(ingestion, Constants.ERROR_CODE_CONNECTION_BANK_INVALID, 
+                    "Could not detect bank from statement - bank identifier is null", 
                     null, Map.of("detection", detectionResult));
                 return;
             }
 
-            // Step 4: Get parser and parse
+            // Validation 2: NONE confidence (zero matches) → ALWAYS reject
+            // Check metadata for pattern_confidence == "NONE" or pattern_bestBank == null
+            String patternConfidence = metadata != null ? (String) metadata.get("pattern_confidence") : null;
+            if ("NONE".equals(patternConfidence) || 
+                (metadata != null && metadata.get("pattern_bestBank") == null && 
+                 "fallback_not_found".equals(metadata.get("source")))) {
+                log.warn("{}[{}][DETECTION] Rejecting PDF: NO bank patterns detected in the document", 
+                    Constants.LOG_PREFIX_PROCESS, ingestionId);
+                markFailed(ingestion, Constants.ERROR_CODE_PDF_NOT_A_STATEMENT, 
+                    "The uploaded file does not appear to be a bank statement.", 
+                    null, Map.of("detection", detectionResult));
+                return;
+            }
+
+            // Validation 3: LOW confidence → ALWAYS reject (but not NONE)
+            if (confidence == BankDetectionResult.DetectionConfidence.LOW) {
+                log.warn("{}[{}][DETECTION] Rejecting PDF: LOW confidence for bank detection", 
+                    Constants.LOG_PREFIX_PROCESS, ingestionId);
+                markFailed(ingestion, Constants.ERROR_CODE_PDF_WEAK_CONFIDENCE, 
+                    "Bank detection confidence is too weak to trust this document.", 
+                    null, Map.of("detection", detectionResult));
+                return;
+            }
+
+            // Validation 4: MEDIUM confidence → accept ONLY if banks match
+            if (confidence == BankDetectionResult.DetectionConfidence.MEDIUM) {
+                boolean mismatch = metadata != null && Boolean.TRUE.equals(metadata.get("connection_mismatch"));
+                if (mismatch) {
+                    String patternBank = metadata != null ? (String) metadata.get("pattern_bestBank") : null;
+                    String connectionBank = ingestion.getBankConnection().getBank() != null 
+                        ? ingestion.getBankConnection().getBank().getSlug() 
+                        : "unknown";
+                    
+                    log.warn("{}[{}][DETECTION] Rejecting PDF: MEDIUM confidence mismatch between pattern '{}' and connection '{}'", 
+                        Constants.LOG_PREFIX_PROCESS, ingestionId, patternBank, connectionBank);
+                    
+                    String errorMessage = String.format(
+                        "Detected bank '%s' does not match connection bank '%s'", 
+                        patternBank, connectionBank);
+                    
+                    markFailed(ingestion, Constants.ERROR_CODE_DETECTION_MISMATCH, 
+                        errorMessage, null, Map.of(
+                            "detection", detectionResult,
+                            "patternBank", patternBank,
+                            "connectionBank", connectionBank
+                        ));
+                    return;
+                }
+            }
+
+            // Validation 5: HIGH confidence → check for mismatch (existing logic)
+            if (confidence == BankDetectionResult.DetectionConfidence.HIGH) {
+                if (metadata != null && Boolean.TRUE.equals(metadata.get("connection_mismatch"))) {
+                    String patternBank = (String) metadata.get("pattern_bestBank");
+                    String connectionBank = ingestion.getBankConnection().getBank() != null 
+                        ? ingestion.getBankConnection().getBank().getSlug() 
+                        : "unknown";
+                    
+                    String errorMessage = String.format(
+                        "Detected bank '%s' does not match connection bank '%s'", 
+                        patternBank, connectionBank);
+                    
+                    log.error("{}[{}][DETECTION] Bank mismatch: pattern='{}', connection='{}'", 
+                        Constants.LOG_PREFIX_PROCESS, ingestionId, patternBank, connectionBank);
+                    
+                    markFailed(ingestion, Constants.ERROR_CODE_DETECTION_MISMATCH, 
+                        errorMessage, null, Map.of(
+                            "detection", detectionResult,
+                            "patternBank", patternBank,
+                            "connectionBank", connectionBank
+                        ));
+                    return;
+                }
+            }
+
+            // Validation 3: Check if parser exists for detected bank
             ParserStrategy parser = parserRegistry.getParser(bankIdentifier);
-            log.info("[PROCESS] Using parser: {}", parser != null ? parser.getParserName() : "NULL");
-            
             if (parser == null) {
-                log.error("[PROCESS] No parser found for bank: {}", bankIdentifier);
-                markFailed(ingestion, "PARSER_NOT_AVAILABLE", 
-                    "No parser available for bank: " + bankIdentifier,
-                    null, Map.of("bankIdentifier", bankIdentifier));
+                log.error("{}[{}][PARSER] No parser found for detected bank: {}", 
+                    Constants.LOG_PREFIX_PROCESS, ingestionId, bankIdentifier);
+                markFailed(ingestion, Constants.ERROR_CODE_PARSER_NOT_FOUND, 
+                    "No parser registered for bank: " + bankIdentifier, 
+                    null, Map.of(
+                        "bankIdentifier", bankIdentifier,
+                        "detection", detectionResult
+                    ));
                 return;
             }
             
-            ParserResult parserResult = parseStatement(ingestion, extractionResult, detectionResult);
-            int transactionsCount = parserResult.getTransactions() != null ? parserResult.getTransactions().size() : 0;
+            // Step 4: Parse statement
+            ParserResult parserResult = statementParsingService.parseStatement(ingestion, extractionResult, detectionResult);
             int snapshotsCount = parserResult.getSnapshots() != null ? parserResult.getSnapshots().size() : 0;
-            
-            log.info("[PROCESS] Parsed {} transactions", transactionsCount);
-            
-            if (transactionsCount == 0) {
-                log.warn("[PROCESS] WARNING: ParserResult.transactions is EMPTY! Check parser logs for details.");
-            }
-            
-            log.info("[PROCESS] Snapshot parsed = {}", snapshotsCount > 0 ? "yes" : "no");
+            log.info("{} Snapshot parsed = {}", Constants.LOG_PREFIX_PROCESS, snapshotsCount > 0 ? "yes" : "no");
 
             // Step 5: Save to database
-            updateStatus(ingestion, IngestionStatus.SAVING, null, null);
-            log.info("[PROCESS] Saving transactions... (count: {})", 
+            statusManager.updateStatus(ingestion, IngestionStatus.SAVING, null, null);
+            log.info("{} Saving transactions... (count: {})", Constants.LOG_PREFIX_PROCESS,
                 parserResult.getTransactions() != null ? parserResult.getTransactions().size() : 0);
 
             saveData(ingestion, parserResult, detectionResult);
@@ -147,18 +219,15 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
             // Step 6: Enrich transactions
             EnrichmentService.EnrichmentResult enrichmentResult =
                 enrichmentProcessor.processIngestion(ingestion.getId(), ingestion.getTenant().getId());
-            log.info("[PROCESS] Enriched transactions: {} enriched (from {} normalized)",
-                enrichmentResult.enrichedCount(), enrichmentResult.normalizedCount());
+            log.info("{} Enriched transactions: {} enriched (from {} normalized)",
+                Constants.LOG_PREFIX_PROCESS, enrichmentResult.enrichedCount(), enrichmentResult.normalizedCount());
 
             // Step 7: Mark as PARSED and set processed_at
-            ingestion.setStatus(IngestionStatus.PARSED);
-            ingestion.setProcessedAt(Instant.now());
-            ingestionRepository.save(ingestion);
-            log.info("[PROCESS] Updated ingestion status to PARSED");
+            statusManager.markAsParsed(ingestion);
 
         } catch (Exception e) {
-            log.error("[INGESTION:{}] Error processing ingestion", ingestionId, e);
-            markFailed(ingestion, "PROCESSING_ERROR", 
+            log.error("{}[{}] Error processing ingestion", Constants.LOG_PREFIX_INGESTION, ingestionId, e);
+            markFailed(ingestion, Constants.ERROR_CODE_PROCESSING_ERROR, 
                 "Error during processing: " + e.getMessage(), e, Map.of());
         }
     }
@@ -166,7 +235,7 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
     @Override
     @Transactional
     public void retryFailedIngestion(UUID ingestionId) {
-        log.info("[INGESTION:{}] Retrying failed ingestion", ingestionId);
+        log.info("{}[{}] Retrying failed ingestion", Constants.LOG_PREFIX_INGESTION, ingestionId);
 
         Ingestion ingestion = ingestionRepository.findById(ingestionId)
             .orElseThrow(() -> new IllegalArgumentException("Ingestion not found: " + ingestionId));
@@ -183,62 +252,6 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
         processIngestion(ingestionId);
     }
 
-    private TextExtractionResult extractText(Ingestion ingestion) throws Exception {
-        if (ingestion.getStoragePath() == null) {
-            throw new IllegalStateException("Ingestion has no storage path");
-        }
-
-        try {
-            return pdfTextExtractor.extract(
-                ingestion.getTenant().getId(),
-                ingestion.getId(),
-                ingestion.getStoragePath()
-            );
-        } catch (PdfExtractionException e) {
-            markFailed(ingestion, "PDF_ERROR", "PDF extraction failed: " + e.getMessage(), 
-                e, Map.of("storagePath", ingestion.getStoragePath()));
-            throw e;
-        }
-    }
-
-    private BankDetectionResult detectBank(Ingestion ingestion, String extractedText) {
-        try {
-            return bankDetector.detect(extractedText, ingestion.getBankConnection().getId());
-        } catch (Exception e) {
-            log.error("[INGESTION:{}] Bank detection error", ingestion.getId(), e);
-            markFailed(ingestion, "DETECTION_ERROR", "Bank detection failed: " + e.getMessage(), 
-                e, Map.of());
-            throw e;
-        }
-    }
-
-    private ParserResult parseStatement(Ingestion ingestion, TextExtractionResult extractionResult,
-                                       BankDetectionResult detection) {
-        ParserStrategy parser = parserRegistry.getParser(detection.getBankIdentifier());
-        if (parser == null) {
-            markFailed(ingestion, "PARSER_NOT_AVAILABLE", 
-                "No parser available for bank: " + detection.getBankIdentifier(),
-                null, Map.of("bankIdentifier", detection.getBankIdentifier()));
-            throw new IllegalStateException("Parser not found for bank: " + detection.getBankIdentifier());
-        }
-
-        try {
-            IngestionContext context = IngestionContext.builder()
-                .ingestionId(ingestion.getId())
-                .tenantId(ingestion.getTenant().getId())
-                .bankConnectionId(ingestion.getBankConnection().getId())
-                .userRef(ingestion.getUserRef())
-                .bankIdentifier(detection.getBankIdentifier())
-                .build();
-
-            return parser.parse(extractionResult, detection, context);
-        } catch (Exception e) {
-            log.error("[INGESTION:{}] Parsing error", ingestion.getId(), e);
-            markFailed(ingestion, "PARSING_ERROR", "Parsing failed: " + e.getMessage(), 
-                e, Map.of("parser", parser.getParserName()));
-            throw e;
-        }
-    }
 
     private void saveData(Ingestion ingestion, ParserResult parserResult, 
                          BankDetectionResult detection) {
@@ -253,28 +266,17 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
 
             transactionWriter.saveParserResult(parserResult, context);
         } catch (Exception e) {
-            log.error("[INGESTION:{}] Storage error", ingestion.getId(), e);
-            markFailed(ingestion, "STORAGE_ERROR", "Failed to save data: " + e.getMessage(), 
+            log.error("{}[{}] Storage error", Constants.LOG_PREFIX_INGESTION, ingestion.getId(), e);
+            markFailed(ingestion, Constants.ERROR_CODE_STORAGE_ERROR, "Failed to save data: " + e.getMessage(), 
                 e, Map.of());
             throw e;
         }
     }
 
-    private void updateStatus(Ingestion ingestion, IngestionStatus status, 
-                            String errorCode, String errorMessage) {
-        ingestion.setStatus(status);
-        if (errorCode != null) {
-            ingestion.setErrorCode(errorCode);
-        }
-        if (errorMessage != null) {
-            ingestion.setErrorMessage(errorMessage);
-        }
-        ingestionRepository.save(ingestion);
-    }
 
     private void markFailed(Ingestion ingestion, String errorCode, String errorMessage, 
                            Throwable throwable, Map<String, Object> context) {
-        updateStatus(ingestion, IngestionStatus.FAILED, errorCode, errorMessage);
+        statusManager.markAsFailed(ingestion, errorCode, errorMessage);
         errorLogger.logError(ingestion, 
             determineErrorCategory(errorCode), 
             errorCode, 
@@ -288,6 +290,11 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
             return ParserError.ErrorCategory.VALIDATION_ERROR;
         }
         if (errorCode.startsWith("PDF_")) {
+            // PDF_WEAK_CONFIDENCE and PDF_NOT_A_STATEMENT are validation errors
+            if (errorCode.equals(Constants.ERROR_CODE_PDF_WEAK_CONFIDENCE) || 
+                errorCode.equals(Constants.ERROR_CODE_PDF_NOT_A_STATEMENT)) {
+                return ParserError.ErrorCategory.VALIDATION_ERROR;
+            }
             return ParserError.ErrorCategory.PDF_ERROR;
         } else if (errorCode.startsWith("DETECTION_")) {
             return ParserError.ErrorCategory.DETECTION_ERROR;

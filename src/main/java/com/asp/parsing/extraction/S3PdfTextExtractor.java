@@ -1,5 +1,6 @@
 package com.asp.parsing.extraction;
 
+import com.asp.common.Constants;
 import com.asp.service.storage.S3DownloadService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,7 +34,8 @@ public class S3PdfTextExtractor implements PdfTextExtractor {
 
     @Override
     public TextExtractionResult extract(UUID tenantId, UUID ingestionId, String storagePath) throws PdfExtractionException {
-        log.debug("[PROCESS][INGESTION:{}] Starting text extraction from S3: {}", ingestionId, storagePath);
+        log.debug("{}[{}] Starting text extraction from S3: {}", 
+                Constants.LOG_PREFIX_PROCESS, ingestionId, storagePath);
 
         Path tempFilePath = null;
         try {
@@ -43,8 +45,8 @@ public class S3PdfTextExtractor implements PdfTextExtractor {
                 throw new PdfExtractionException("Failed to download PDF from S3: " + storagePath);
             }
 
-            log.info("[PROCESS][INGESTION:{}] Downloaded PDF from S3: size={} KB, path={}",
-                    ingestionId, Files.size(tempFilePath) / 1024, tempFilePath);
+            log.info("{}[{}] Downloaded PDF from S3: size={} KB, path={}",
+                    Constants.LOG_PREFIX_PROCESS, ingestionId, Files.size(tempFilePath) / 1024, tempFilePath);
 
             // Load PDF document
             PDDocument document;
@@ -79,8 +81,8 @@ public class S3PdfTextExtractor implements PdfTextExtractor {
                 // Simple heuristic: if text is very short, might be scanned
                 boolean isScanned = text.trim().length() < 100;
 
-                log.info("[PROCESS][INGESTION:{}] Extracted text from PDF: {} pages, {} characters",
-                        ingestionId, pageCount, text.length());
+                log.info("{}[{}] Extracted text from PDF: {} pages, {} characters",
+                        Constants.LOG_PREFIX_PROCESS, ingestionId, pageCount, text.length());
 
                 return TextExtractionResult.builder()
                         .text(text)
@@ -96,16 +98,19 @@ public class S3PdfTextExtractor implements PdfTextExtractor {
             }
 
         } catch (IOException e) {
-            log.error("[PROCESS][INGESTION:{}] Failed to extract text from PDF: {}", ingestionId, e.getMessage(), e);
+            log.error("{}[{}] Failed to extract text from PDF: {}", 
+                    Constants.LOG_PREFIX_PROCESS, ingestionId, e.getMessage(), e);
             throw new PdfExtractionException("Failed to extract text from PDF: " + e.getMessage(), e);
         } finally {
             // Clean up temp file
             if (tempFilePath != null) {
                 try {
                     Files.deleteIfExists(tempFilePath);
-                    log.debug("[PROCESS][INGESTION:{}] Cleaned up temp file: {}", ingestionId, tempFilePath);
+                    log.debug("{}[{}] Cleaned up temp file: {}", 
+                            Constants.LOG_PREFIX_PROCESS, ingestionId, tempFilePath);
                 } catch (IOException e) {
-                    log.warn("[PROCESS][INGESTION:{}] Failed to delete temp file: {}", ingestionId, tempFilePath, e);
+                    log.warn("{}[{}] Failed to delete temp file: {}", 
+                            Constants.LOG_PREFIX_PROCESS, ingestionId, tempFilePath, e);
                 }
             }
         }

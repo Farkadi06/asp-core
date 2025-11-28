@@ -1,5 +1,6 @@
 package com.asp.parsing.writer;
 
+import com.asp.common.Constants;
 import com.asp.domain.Ingestion;
 import com.asp.domain.ParserError;
 import com.asp.domain.normalized.NormalizedAccount;
@@ -44,8 +45,8 @@ public class DefaultTransactionWriter implements TransactionWriter {
     @Override
     @Transactional
     public void saveParserResult(ParserResult result, IngestionContext context) {
-        log.info("[INGESTION:{}] Saving parser result: {} accounts, {} transactions, {} snapshots",
-            context.getIngestionId(),
+        log.info("{}[{}] Saving parser result: {} accounts, {} transactions, {} snapshots",
+            Constants.LOG_PREFIX_INGESTION, context.getIngestionId(),
             result.getAccounts().size(),
             result.getTransactions().size(),
             result.getSnapshots().size());
@@ -59,14 +60,14 @@ public class DefaultTransactionWriter implements TransactionWriter {
         saveTransactionsInternal(result.getTransactions(), ingestion, context, accountMap);
         saveSnapshotsInternal(result.getSnapshots(), result.getStatementPeriod(), ingestion, context, accountMap);
 
-        log.info("[INGESTION:{}] Successfully saved parser result", context.getIngestionId());
+        log.info("{}[{}] Successfully saved parser result", Constants.LOG_PREFIX_INGESTION, context.getIngestionId());
     }
 
     @Override
     @Transactional
     public void saveAccount(NormalizedAccount account, IngestionContext context) {
-        log.debug("[INGESTION:{}] Saving single account: {} (type: {})",
-            context.getIngestionId(), account.getAccountNumber(), account.getAccountType());
+        log.debug("{}[{}] Saving single account: {} (type: {})",
+            Constants.LOG_PREFIX_INGESTION, context.getIngestionId(), account.getAccountNumber(), account.getAccountType());
 
         Ingestion ingestion = loadIngestion(context.getIngestionId());
         upsertAccounts(Collections.singletonList(account), ingestion, context);
@@ -75,7 +76,7 @@ public class DefaultTransactionWriter implements TransactionWriter {
     @Override
     @Transactional
     public void saveTransactions(List<NormalizedTransaction> transactions, IngestionContext context) {
-        log.debug("[INGESTION:{}] Saving {} transactions (direct call)", context.getIngestionId(), transactions.size());
+        log.debug("{}[{}] Saving {} transactions (direct call)", Constants.LOG_PREFIX_INGESTION, context.getIngestionId(), transactions.size());
 
         Ingestion ingestion = loadIngestion(context.getIngestionId());
         Map<String, com.asp.domain.NormalizedAccount> accountMap = new HashMap<>();
@@ -85,7 +86,7 @@ public class DefaultTransactionWriter implements TransactionWriter {
     @Override
     @Transactional
     public void saveSnapshots(List<NormalizedAccountSnapshot> snapshots, IngestionContext context) {
-        log.debug("[INGESTION:{}] Saving {} snapshots (direct call)", context.getIngestionId(), snapshots.size());
+        log.debug("{}[{}] Saving {} snapshots (direct call)", Constants.LOG_PREFIX_INGESTION, context.getIngestionId(), snapshots.size());
 
         Ingestion ingestion = loadIngestion(context.getIngestionId());
         saveSnapshotsInternal(snapshots, null, ingestion, context, new HashMap<>());
@@ -97,7 +98,7 @@ public class DefaultTransactionWriter implements TransactionWriter {
         }
 
         if (result.getAccounts() == null || result.getAccounts().isEmpty()) {
-            log.warn("[INGESTION:{}] Parser result has no accounts", context.getIngestionId());
+            log.warn("{}[{}] Parser result has no accounts", Constants.LOG_PREFIX_INGESTION, context.getIngestionId());
         }
 
         if (result.getTransactions() == null) {
@@ -116,8 +117,8 @@ public class DefaultTransactionWriter implements TransactionWriter {
 
             for (NormalizedTransaction transaction : result.getTransactions()) {
                 if (!accountNumbers.contains(transaction.getAccountNumber())) {
-                    log.warn("[INGESTION:{}] Transaction references unknown account: {}",
-                        context.getIngestionId(), transaction.getAccountNumber());
+                    log.warn("{}[{}] Transaction references unknown account: {}",
+                        Constants.LOG_PREFIX_INGESTION, context.getIngestionId(), transaction.getAccountNumber());
                 }
             }
         }
@@ -138,7 +139,7 @@ public class DefaultTransactionWriter implements TransactionWriter {
 
         for (NormalizedAccount normalizedAccount : accounts) {
             if (normalizedAccount == null || normalizedAccount.getAccountNumber() == null) {
-                log.warn("[INGESTION:{}] Skipping account with missing account number", context.getIngestionId());
+                log.warn("{}[{}] Skipping account with missing account number", Constants.LOG_PREFIX_INGESTION, context.getIngestionId());
                 continue;
             }
 
@@ -182,7 +183,7 @@ public class DefaultTransactionWriter implements TransactionWriter {
             return;
         }
 
-        log.debug("[INGESTION:{}] Persisting {} transactions", context.getIngestionId(), transactions.size());
+        log.debug("{}[{}] Persisting {} transactions", Constants.LOG_PREFIX_INGESTION, context.getIngestionId(), transactions.size());
 
         for (NormalizedTransaction transaction : transactions) {
             if (transaction == null) {
@@ -191,7 +192,7 @@ public class DefaultTransactionWriter implements TransactionWriter {
 
             String accountNumber = transaction.getAccountNumber();
             if (accountNumber == null) {
-                log.warn("[INGESTION:{}] Transaction missing account number, skipping", context.getIngestionId());
+                log.warn("{}[{}] Transaction missing account number, skipping", Constants.LOG_PREFIX_INGESTION, context.getIngestionId());
                 continue;
             }
 
@@ -227,8 +228,8 @@ public class DefaultTransactionWriter implements TransactionWriter {
             // CIH statements can contain genuine duplicates (e.g., multiple identical mobile recharges)
             // Each transaction row from the PDF must result in one database insert
             
-            log.debug("[INGESTION:{}] Adding transaction: account={}, date={}, amount={}, description=\"{}\"",
-                context.getIngestionId(), accountNumber, transactionDate, amount, 
+            log.debug("{}[{}] Adding transaction: account={}, date={}, amount={}, description=\"{}\"",
+                Constants.LOG_PREFIX_INGESTION, context.getIngestionId(), accountNumber, transactionDate, amount, 
                 transaction.getDescription() != null ? transaction.getDescription().substring(0, Math.min(50, transaction.getDescription().length())) : "");
 
             com.asp.domain.NormalizedTransaction transactionEntity = com.asp.domain.NormalizedTransaction.builder()
@@ -247,11 +248,11 @@ public class DefaultTransactionWriter implements TransactionWriter {
 
             try {
                 transactionRepository.save(transactionEntity);
-                log.debug("[INGESTION:{}] Successfully saved transaction: account={}, date={}, amount={}",
-                    context.getIngestionId(), accountNumber, transactionDate, amount);
+                log.debug("{}[{}] Successfully saved transaction: account={}, date={}, amount={}",
+                    Constants.LOG_PREFIX_INGESTION, context.getIngestionId(), accountNumber, transactionDate, amount);
             } catch (Exception e) {
-                log.error("[INGESTION:{}] Failed to save transaction for account {} on {}",
-                    context.getIngestionId(), accountNumber, transactionDate, e);
+                log.error("{}[{}] Failed to save transaction for account {} on {}",
+                    Constants.LOG_PREFIX_INGESTION, context.getIngestionId(), accountNumber, transactionDate, e);
                 parserErrorLogger.logError(ingestion, ParserError.ErrorCategory.STORAGE_ERROR,
                     "TRANSACTION_SAVE_FAILED", "Failed to save transaction: " + e.getMessage(),
                     e, Map.of("accountNumber", accountNumber, "transactionDate", transactionDate.toString()));
@@ -268,7 +269,7 @@ public class DefaultTransactionWriter implements TransactionWriter {
             return;
         }
 
-        log.debug("[INGESTION:{}] Persisting {} account snapshots", context.getIngestionId(), snapshots.size());
+        log.debug("{}[{}] Persisting {} account snapshots", Constants.LOG_PREFIX_INGESTION, context.getIngestionId(), snapshots.size());
 
         for (NormalizedAccountSnapshot snapshot : snapshots) {
             if (snapshot == null || snapshot.getAccountNumber() == null) {

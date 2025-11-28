@@ -1,5 +1,6 @@
 package com.asp.service;
 
+import com.asp.common.Constants;
 import com.asp.domain.BankConnection;
 import com.asp.domain.BankConnectionRepository;
 import com.asp.domain.Ingestion;
@@ -8,7 +9,6 @@ import com.asp.domain.IngestionSource;
 import com.asp.domain.IngestionStatus;
 import com.asp.domain.IngestionType;
 import com.asp.dto.IngestionResponse;
-import com.asp.service.storage.S3UploadService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
@@ -17,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -30,7 +29,7 @@ public class IngestionService {
     private final IngestionRepository ingestionRepository;
     private final BankConnectionRepository bankConnectionRepository;
     private final SqsIngestionPublisher sqsIngestionPublisher;
-    private final S3UploadService s3UploadService;
+    private final com.asp.service.storage.S3StorageService s3StorageService;
 
     @Transactional
     public IngestionResponse createIngestionForPdf(UUID tenantId, UUID bankConnectionId, MultipartFile file) {
@@ -55,9 +54,9 @@ public class IngestionService {
 
             // Optional: validate content type (log warning if not PDF)
             String fileContentType = file.getContentType();
-            if (fileContentType == null || !fileContentType.startsWith("application/pdf")) {
-                log.warn("File {} has content type {}, expected application/pdf, traceId: {}", 
-                    file.getOriginalFilename(), fileContentType, traceId);
+            if (fileContentType == null || !fileContentType.startsWith(Constants.CONTENT_TYPE_PDF)) {
+                log.warn("File {} has content type {}, expected {}, traceId: {}", 
+                    file.getOriginalFilename(), fileContentType, Constants.CONTENT_TYPE_PDF, traceId);
             }
 
             // Load BankConnection by bankConnectionId and tenantId
@@ -90,31 +89,32 @@ public class IngestionService {
 
             // Build S3 storage path: tenants/{tenantId}/ingestions/{ingestionId}/original/{originalFileName}
             String sanitizedFileName = sanitizeFileName(file.getOriginalFilename());
-            String storagePath = String.format("tenants/%s/ingestions/%s/original/%s",
-                    tenantId.toString(),
-                    savedIngestion.getId().toString(),
+            String storagePath = s3StorageService.buildStoragePath(
+                    tenantId,
+                    savedIngestion.getId(),
                     sanitizedFileName);
 
             try {
                 // Upload file directly to S3
                 String contentType = fileContentType != null && !fileContentType.isBlank() 
                     ? fileContentType 
-                    : "application/pdf"; // Default for PDF files
+                    : Constants.CONTENT_TYPE_PDF;
 
-                s3UploadService.uploadFile(storagePath, file.getInputStream(), file.getSize(), contentType);
+                s3StorageService.uploadFile(storagePath, file.getInputStream(), file.getSize(), contentType);
 
                 // Update ingestion with storage path
                 savedIngestion.setStoragePath(storagePath);
                 savedIngestion = ingestionRepository.save(savedIngestion);
 
-                log.info("Created ingestion {} for tenant {}, bankConnection {}, userRef {}, traceId: {}, storagePath: {}", 
-                    savedIngestion.getId(), tenantId, bankConnectionId, userRef, traceId, storagePath);
+                log.info("{}[{}] Created ingestion for tenant={}, bankConnection={}, userRef={}, traceId={}, storagePath={}", 
+                    Constants.LOG_PREFIX_INGESTION, savedIngestion.getId(), tenantId, bankConnectionId, userRef, traceId, storagePath);
 
             } catch (Exception e) {
                 // If S3 upload fails, mark ingestion as FAILED
-                log.error("Failed to upload file to S3 for ingestion {}, traceId: {}", savedIngestion.getId(), traceId, e);
+                log.error("{}[{}] Failed to upload file to S3, traceId={}", 
+                        Constants.LOG_PREFIX_INGESTION, savedIngestion.getId(), traceId, e);
                 savedIngestion.setStatus(IngestionStatus.FAILED);
-                savedIngestion.setErrorCode("STORAGE_ERROR");
+                savedIngestion.setErrorCode(Constants.ERROR_CODE_STORAGE_ERROR);
                 savedIngestion.setErrorMessage("Failed to upload file to S3: " + e.getMessage());
                 savedIngestion = ingestionRepository.save(savedIngestion);
                 
@@ -131,14 +131,13 @@ public class IngestionService {
                         storagePath,
                         traceId
                     );
-                    log.info("Published ingestion {} to SQS queue - messageId: {}, traceId: {}", 
-                        savedIngestion.getId(), messageId, traceId);
+                    log.info("{}[{}] Published to SQS queue: messageId={}, traceId={}", 
+                        Constants.LOG_PREFIX_INGESTION, savedIngestion.getId(), messageId, traceId);
                 } catch (RuntimeException e) {
                     // Log error but don't fail ingestion creation
                     // The ingestion is already saved and can be processed manually later
-                    log.error("Failed to publish ingestion {} to SQS queue, traceId: {}. " +
-                        "Ingestion created successfully but will need manual processing.", 
-                        savedIngestion.getId(), traceId, e);
+                    log.error("{}[{}] Failed to publish to SQS queue, traceId={}. Ingestion created successfully but will need manual processing.", 
+                        Constants.LOG_PREFIX_INGESTION, savedIngestion.getId(), traceId, e);
                     // Optionally, you could mark ingestion with a warning flag here
                 }
             }
@@ -227,7 +226,7 @@ public class IngestionService {
      */
     private String sanitizeFileName(String fileName) {
         if (fileName == null || fileName.isEmpty()) {
-            return "unnamed.pdf";
+            return Constants.DEFAULT_FILENAME;
         }
         
         // Remove path separators and parent directory references
@@ -238,12 +237,12 @@ public class IngestionService {
         
         // Ensure it's not empty after sanitization
         if (sanitized.isEmpty()) {
-            sanitized = "unnamed.pdf";
+            sanitized = Constants.DEFAULT_FILENAME;
         }
         
         // Ensure it has an extension or add .pdf as default
         if (!sanitized.contains(".")) {
-            sanitized += ".pdf";
+            sanitized += Constants.PDF_EXTENSION;
         }
         
         return sanitized;

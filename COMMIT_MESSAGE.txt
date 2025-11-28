@@ -1,0 +1,55 @@
+feat: Implement bank detection system with strict confidence validation
+
+Implement comprehensive bank detection system with hybrid pattern matching
+and strict confidence-based validation in the ingestion pipeline.
+
+## Bank Detection System
+
+- Replace hardcoded "cih" return with hybrid detection algorithm
+- Implement pattern-based detection with regex matching for CIH, Attijari, BMCE, and BP
+- Add database fallback mechanism using bank_connection.bank.slug
+- Enrich metadata with mismatch detection and confidence levels
+- Extend bank patterns to include BP (Banque Populaire) and AWB as Attijari alias
+
+## Strict Confidence Validation
+
+- Reject LOW confidence detections (PDF_WEAK_CONFIDENCE)
+- Reject NONE confidence detections (PDF_NOT_A_STATEMENT)
+- Enforce MEDIUM confidence: accept only if pattern bank matches connection bank
+- Preserve HIGH confidence validation with mismatch check
+
+## Error Codes Added
+
+- DETECTION_MISMATCH: Pattern bank ≠ connection bank
+- PARSER_NOT_FOUND: No parser for detected bank
+- CONNECTION_BANK_INVALID: Bank identifier is null/empty
+- PDF_WEAK_CONFIDENCE: LOW confidence detection
+- PDF_NOT_A_STATEMENT: NONE confidence (zero matches)
+
+## Test Coverage
+
+- 13 test cases for bank detection (DefaultBankDetectorTest)
+- 16 test cases for validation (DefaultIngestionProcessorServiceTest)
+- Comprehensive edge case coverage
+
+## Files Modified
+
+src/main/java/com/asp/
+- common/Constants.java: Added 5 new error codes
+- parsing/detection/DefaultBankDetector.java: Complete rewrite with hybrid algorithm
+- parsing/processor/DefaultIngestionProcessorService.java: Added strict validation
+- parsing/parser/ParserRegistry.java: Added "bp" to bank identifiers
+
+src/test/java/com/asp/
+- parsing/detection/DefaultBankDetectorTest.java: New test suite
+- parsing/processor/DefaultIngestionProcessorServiceTest.java: New test suite
+
+## Validation Rules (ASP Policy)
+
+- HIGH confidence: Accept (unless mismatch)
+- MEDIUM confidence: Accept only if pattern bank == connection bank
+- LOW confidence: Reject
+- NONE confidence: Reject (not a statement)
+
+All tests passing (29 total). Build successful. No breaking changes.
+

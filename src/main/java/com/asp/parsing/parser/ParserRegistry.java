@@ -32,7 +32,7 @@ public class ParserRegistry {
             
             // Register parser for each bank it can handle
             // Check common bank identifiers
-            String[] bankIdentifiers = {"cih", "attijari", "bmce"};
+            String[] bankIdentifiers = {"cih", "attijari", "bmce", "bp"};
             for (String bankId : bankIdentifiers) {
                 if (parser.canHandle(bankId)) {
                     parsers.put(bankId, parser);

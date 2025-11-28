@@ -1,5 +1,6 @@
 package com.asp.controller.internal;
 
+import com.asp.common.Constants;
 import com.asp.domain.Ingestion;
 import com.asp.domain.IngestionRepository;
 import com.asp.mapper.IngestionMetadataMapper;
@@ -37,7 +38,7 @@ public class IngestionMetadataController {
     @GetMapping("/{ingestionId}")
     public ResponseEntity<IngestionMetadataDto> getIngestionMetadata(
             @PathVariable UUID ingestionId,
-            @RequestHeader(value = "X-Internal-Token", required = false) String token) {
+            @RequestHeader(value = Constants.INTERNAL_TOKEN_HEADER, required = false) String token) {
 
         log.debug("[INTERNAL] Fetching ingestion metadata for ingestionId: {}", ingestionId);
 
