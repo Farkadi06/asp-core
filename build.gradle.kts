@@ -1,10 +1,8 @@
 plugins {
-    java
     id("org.springframework.boot") version "3.3.0"
     id("io.spring.dependency-management") version "1.1.5"
+    java
 }
-
-import org.gradle.api.tasks.wrapper.Wrapper
 
 group = "com.asp"
 version = "1.0.0-SNAPSHOT"
@@ -52,6 +50,15 @@ dependencies {
     // PDF Processing
     implementation("org.apache.pdfbox:pdfbox:3.0.1")
 
+    // AWS SDK v2
+    implementation("software.amazon.awssdk:sqs:2.20.0")
+    implementation("software.amazon.awssdk:sts:2.20.0")
+    implementation("software.amazon.awssdk:auth:2.20.0")
+    implementation("software.amazon.awssdk:secretsmanager:2.20.0")
+    implementation("software.amazon.awssdk:s3:2.20.0")
+
+    implementation(project(":asp-shared"))
+
     // Development Tools
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     
@@ -68,8 +75,4 @@ tasks.withType<Test> {
     useJUnitPlatform()
 }
 
-tasks.wrapper {
-    gradleVersion = "8.7"
-    distributionType = Wrapper.DistributionType.BIN
-}
 

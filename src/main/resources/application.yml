@@ -62,6 +62,19 @@ asp:
       poll-interval-ms: 2000
       batch-size: 5
 
+# AWS Configuration
+# Queue URL is resolved via:
+# 1. Environment variable: ASP_SQS_INGESTION_QUEUE_URL (local/dev)
+# 2. AWS Secrets Manager: aws.secrets-manager.secret-name (production)
+aws:
+  region: ${AWS_REGION:us-east-1}
+  secrets-manager:
+    secret-name: ${AWS_SECRETS_MANAGER_SECRET_NAME:}  # Optional: Secret name in AWS Secrets Manager containing queue URL
+
+# S3 config (env-based)
+# AWS_REGION: e.g. eu-west-1
+# ASP_S3_BUCKET_NAME: S3 bucket name where ingestion PDFs are stored
+
 server:
   port: ${SERVER_PORT:8080}
   error:

@@ -78,13 +78,13 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
     @Override
     @Transactional
     public void processIngestion(UUID ingestionId) {
-        log.info("[INGESTION:{}] Starting ingestion processing", ingestionId);
+        log.info("[PROCESS] Starting ingestion processing id={}", ingestionId);
 
         Ingestion ingestion = ingestionRepository.findById(ingestionId)
             .orElseThrow(() -> new IllegalArgumentException("Ingestion not found: " + ingestionId));
 
         if (ingestion.getStatus() != IngestionStatus.PENDING && ingestion.getStatus() != IngestionStatus.FAILED) {
-            log.warn("[INGESTION:{}] Ingestion is not in PENDING or FAILED state: {}", 
+            log.warn("[PROCESS][INGESTION:{}] Ingestion is not in PENDING or FAILED state: {}", 
                 ingestionId, ingestion.getStatus());
             return;
         }
@@ -97,14 +97,13 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
             // Step 2: Extract text from PDF
             TextExtractionResult extractionResult = extractText(ingestion);
             int textLength = extractionResult.getText() != null ? extractionResult.getText().length() : 0;
-            log.info("[INGESTION:{}] Extracted text length = {} characters, pages = {}",
-                ingestionId, textLength, extractionResult.getPageCount());
+            log.info("[PROCESS] Extracted text: {} chars", textLength);
 
             // Step 3: Detect bank
             BankDetectionResult detectionResult = detectBank(ingestion, extractionResult.getText());
             String bankIdentifier = detectionResult.getBankIdentifier();
-            log.info("[INGESTION:{}] Bank detected = {} (confidence: {})",
-                ingestionId, bankIdentifier, detectionResult.getConfidence());
+            log.info("[PROCESS] Bank detected = {} (confidence: {})",
+                bankIdentifier, detectionResult.getConfidence());
 
             if (bankIdentifier == null) {
                 log.error("[INGESTION:{}] Bank detection failed - bank identifier is null", ingestionId);
@@ -116,11 +115,10 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
 
             // Step 4: Get parser and parse
             ParserStrategy parser = parserRegistry.getParser(bankIdentifier);
-            log.info("[INGESTION:{}] Parser = {} for bank {}", 
-                ingestionId, parser != null ? parser.getParserName() : "NULL", bankIdentifier);
+            log.info("[PROCESS] Using parser: {}", parser != null ? parser.getParserName() : "NULL");
             
             if (parser == null) {
-                log.error("[INGESTION:{}] No parser found for bank: {}", ingestionId, bankIdentifier);
+                log.error("[PROCESS] No parser found for bank: {}", bankIdentifier);
                 markFailed(ingestion, "PARSER_NOT_AVAILABLE", 
                     "No parser available for bank: " + bankIdentifier,
                     null, Map.of("bankIdentifier", bankIdentifier));
@@ -128,42 +126,35 @@ public class DefaultIngestionProcessorService implements IngestionProcessorServi
             }
             
             ParserResult parserResult = parseStatement(ingestion, extractionResult, detectionResult);
-            int accountsCount = parserResult.getAccounts() != null ? parserResult.getAccounts().size() : 0;
             int transactionsCount = parserResult.getTransactions() != null ? parserResult.getTransactions().size() : 0;
             int snapshotsCount = parserResult.getSnapshots() != null ? parserResult.getSnapshots().size() : 0;
             
-            log.info("[INGESTION:{}] Parsing completed: {} accounts, {} transactions, {} snapshots",
-                ingestionId, accountsCount, transactionsCount, snapshotsCount);
+            log.info("[PROCESS] Parsed {} transactions", transactionsCount);
             
             if (transactionsCount == 0) {
-                log.warn("[INGESTION:{}] WARNING: ParserResult.transactions is EMPTY! Check parser logs for details.", 
-                    ingestionId);
+                log.warn("[PROCESS] WARNING: ParserResult.transactions is EMPTY! Check parser logs for details.");
             }
             
-            log.info("[INGESTION:{}] Snapshot parsed = {}", 
-                ingestionId, snapshotsCount > 0 ? "yes" : "no");
+            log.info("[PROCESS] Snapshot parsed = {}", snapshotsCount > 0 ? "yes" : "no");
 
-            // Step 5: Mark as PARSED
-            updateStatus(ingestion, IngestionStatus.PARSED, null, null);
-            log.info("[INGESTION:{}] Status updated to PARSED", ingestionId);
-
-            // Step 6: Save to database
+            // Step 5: Save to database
             updateStatus(ingestion, IngestionStatus.SAVING, null, null);
-            log.info("[INGESTION:{}] Status updated to SAVING", ingestionId);
-            log.info("[INGESTION:{}] Saving transactions... (count: {})", 
-                ingestionId, parserResult.getTransactions() != null ? parserResult.getTransactions().size() : 0);
+            log.info("[PROCESS] Saving transactions... (count: {})", 
+                parserResult.getTransactions() != null ? parserResult.getTransactions().size() : 0);
 
             saveData(ingestion, parserResult, detectionResult);
+            
+            // Step 6: Enrich transactions
             EnrichmentService.EnrichmentResult enrichmentResult =
                 enrichmentProcessor.processIngestion(ingestion.getId(), ingestion.getTenant().getId());
-            log.info("[INGESTION:{}] Enrichment persisted {} rows (from {} normalized)",
-                ingestionId, enrichmentResult.enrichedCount(), enrichmentResult.normalizedCount());
+            log.info("[PROCESS] Enriched transactions: {} enriched (from {} normalized)",
+                enrichmentResult.enrichedCount(), enrichmentResult.normalizedCount());
 
-            // Step 7: Mark as PROCESSED
-            ingestion.setStatus(IngestionStatus.PROCESSED);
+            // Step 7: Mark as PARSED and set processed_at
+            ingestion.setStatus(IngestionStatus.PARSED);
             ingestion.setProcessedAt(Instant.now());
             ingestionRepository.save(ingestion);
-            log.info("[INGESTION:{}] Status updated to PROCESSED", ingestionId);
+            log.info("[PROCESS] Updated ingestion status to PARSED");
 
         } catch (Exception e) {
             log.error("[INGESTION:{}] Error processing ingestion", ingestionId, e);

@@ -8,9 +8,10 @@ import com.asp.domain.IngestionSource;
 import com.asp.domain.IngestionStatus;
 import com.asp.domain.IngestionType;
 import com.asp.dto.IngestionResponse;
-import com.asp.storage.DocumentStorageService;
+import com.asp.service.storage.S3UploadService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -28,79 +29,128 @@ public class IngestionService {
 
     private final IngestionRepository ingestionRepository;
     private final BankConnectionRepository bankConnectionRepository;
-    private final DocumentStorageService documentStorageService;
+    private final SqsIngestionPublisher sqsIngestionPublisher;
+    private final S3UploadService s3UploadService;
 
     @Transactional
     public IngestionResponse createIngestionForPdf(UUID tenantId, UUID bankConnectionId, MultipartFile file) {
-        log.debug("Creating PDF ingestion for tenant {}, bankConnection {}, file: {}", 
-            tenantId, bankConnectionId, file != null ? file.getOriginalFilename() : "null");
-
-        // Validate file is not null and not empty (for debugging, we allow null but will fail later)
-        // TODO: Remove this temporary debugging allowance and enforce file validation
-        if (file == null || file.isEmpty()) {
-            log.error("File validation failed - file is null or empty. Tenant: {}, BankConnection: {}", 
-                tenantId, bankConnectionId);
-            throw new IllegalArgumentException("File cannot be null or empty");
-        }
-
-        // Optional: validate content type (log warning if not PDF)
-        String contentType = file.getContentType();
-        if (contentType == null || !contentType.startsWith("application/pdf")) {
-            log.warn("File {} has content type {}, expected application/pdf", 
-                file.getOriginalFilename(), contentType);
-        }
-
-        // Load BankConnection by bankConnectionId and tenantId
-        BankConnection bankConnection = bankConnectionRepository.findByIdAndTenantId(bankConnectionId, tenantId)
-            .orElseThrow(() -> new IllegalArgumentException("Bank connection not found: " + bankConnectionId));
-
-        // Read userRef from BankConnection
-        String userRef = bankConnection.getUserRef();
-        if (userRef == null || userRef.trim().isEmpty()) {
-            throw new IllegalStateException("Bank connection has no userRef");
-        }
-
-        // Create Ingestion entity
-        Ingestion ingestion = Ingestion.builder()
-            .tenant(bankConnection.getTenant())
-            .bankConnection(bankConnection)
-            .userRef(userRef)
-            .status(IngestionStatus.PENDING)
-            .source(IngestionSource.MANUAL_UPLOAD)
-            .ingestionType(IngestionType.PDF_STATEMENT)
-            .originalFileName(file.getOriginalFilename())
-            .fileSize(file.getSize())
-            .build();
-
-        // Save ingestion to obtain its id
-        Ingestion savedIngestion = ingestionRepository.save(ingestion);
-
+        // Generate trace ID for request tracking
+        String traceId = UUID.randomUUID().toString();
+        
+        // Set MDC context for logging
+        MDC.put("tenant_id", tenantId != null ? tenantId.toString() : null);
+        MDC.put("trace_id", traceId);
+        
         try {
-            // Store file using DocumentStorageService
-            String storagePath = documentStorageService.storeIngestionFile(
-                tenantId, 
-                savedIngestion.getId(), 
-                file.getOriginalFilename(), 
-                file.getInputStream()
-            );
+            log.debug("Creating PDF ingestion for tenant {}, bankConnection {}, file: {}, traceId: {}", 
+                tenantId, bankConnectionId, file != null ? file.getOriginalFilename() : "null", traceId);
 
-            // Update ingestion with storage path
-            savedIngestion.setStoragePath(storagePath);
-            savedIngestion = ingestionRepository.save(savedIngestion);
+            // Validate file is not null and not empty (for debugging, we allow null but will fail later)
+            // TODO: Remove this temporary debugging allowance and enforce file validation
+            if (file == null || file.isEmpty()) {
+                log.error("File validation failed - file is null or empty. Tenant: {}, BankConnection: {}, traceId: {}", 
+                    tenantId, bankConnectionId, traceId);
+                throw new IllegalArgumentException("File cannot be null or empty");
+            }
 
-            log.info("Created ingestion {} for tenant {}, bankConnection {}, userRef {}", 
-                savedIngestion.getId(), tenantId, bankConnectionId, userRef);
+            // Optional: validate content type (log warning if not PDF)
+            String fileContentType = file.getContentType();
+            if (fileContentType == null || !fileContentType.startsWith("application/pdf")) {
+                log.warn("File {} has content type {}, expected application/pdf, traceId: {}", 
+                    file.getOriginalFilename(), fileContentType, traceId);
+            }
 
-        } catch (IOException e) {
-            // If storage fails, mark ingestion as FAILED
-            log.error("Failed to store file for ingestion {}", savedIngestion.getId(), e);
-            savedIngestion.setStatus(IngestionStatus.FAILED);
-            savedIngestion.setErrorCode("STORAGE_ERROR");
-            savedIngestion.setErrorMessage("Failed to store file: " + e.getMessage());
-            savedIngestion = ingestionRepository.save(savedIngestion);
+            // Load BankConnection by bankConnectionId and tenantId
+            BankConnection bankConnection = bankConnectionRepository.findByIdAndTenantId(bankConnectionId, tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Bank connection not found: " + bankConnectionId));
+
+            // Read userRef from BankConnection
+            String userRef = bankConnection.getUserRef();
+            if (userRef == null || userRef.trim().isEmpty()) {
+                throw new IllegalStateException("Bank connection has no userRef");
+            }
+
+            // Create Ingestion entity
+            Ingestion ingestion = Ingestion.builder()
+                .tenant(bankConnection.getTenant())
+                .bankConnection(bankConnection)
+                .userRef(userRef)
+                .status(IngestionStatus.PENDING)
+                .source(IngestionSource.MANUAL_UPLOAD)
+                .ingestionType(IngestionType.PDF_STATEMENT)
+                .originalFileName(file.getOriginalFilename())
+                .fileSize(file.getSize())
+                .build();
+
+            // Save ingestion to obtain its id
+            Ingestion savedIngestion = ingestionRepository.save(ingestion);
+            
+            // Update MDC with ingestion ID
+            MDC.put("ingestion_id", savedIngestion.getId().toString());
+
+            // Build S3 storage path: tenants/{tenantId}/ingestions/{ingestionId}/original/{originalFileName}
+            String sanitizedFileName = sanitizeFileName(file.getOriginalFilename());
+            String storagePath = String.format("tenants/%s/ingestions/%s/original/%s",
+                    tenantId.toString(),
+                    savedIngestion.getId().toString(),
+                    sanitizedFileName);
+
+            try {
+                // Upload file directly to S3
+                String contentType = fileContentType != null && !fileContentType.isBlank() 
+                    ? fileContentType 
+                    : "application/pdf"; // Default for PDF files
+
+                s3UploadService.uploadFile(storagePath, file.getInputStream(), file.getSize(), contentType);
+
+                // Update ingestion with storage path
+                savedIngestion.setStoragePath(storagePath);
+                savedIngestion = ingestionRepository.save(savedIngestion);
+
+                log.info("Created ingestion {} for tenant {}, bankConnection {}, userRef {}, traceId: {}, storagePath: {}", 
+                    savedIngestion.getId(), tenantId, bankConnectionId, userRef, traceId, storagePath);
+
+            } catch (Exception e) {
+                // If S3 upload fails, mark ingestion as FAILED
+                log.error("Failed to upload file to S3 for ingestion {}, traceId: {}", savedIngestion.getId(), traceId, e);
+                savedIngestion.setStatus(IngestionStatus.FAILED);
+                savedIngestion.setErrorCode("STORAGE_ERROR");
+                savedIngestion.setErrorMessage("Failed to upload file to S3: " + e.getMessage());
+                savedIngestion = ingestionRepository.save(savedIngestion);
+                
+                // Don't publish to SQS if storage failed
+                return mapToResponse(savedIngestion);
+            }
+
+            // Publish to SQS queue after successful ingestion creation and file storage
+            if (storagePath != null && savedIngestion.getStatus() == IngestionStatus.PENDING) {
+                try {
+                    String messageId = sqsIngestionPublisher.publishIngestionMessage(
+                        savedIngestion.getId(),
+                        tenantId,
+                        storagePath,
+                        traceId
+                    );
+                    log.info("Published ingestion {} to SQS queue - messageId: {}, traceId: {}", 
+                        savedIngestion.getId(), messageId, traceId);
+                } catch (RuntimeException e) {
+                    // Log error but don't fail ingestion creation
+                    // The ingestion is already saved and can be processed manually later
+                    log.error("Failed to publish ingestion {} to SQS queue, traceId: {}. " +
+                        "Ingestion created successfully but will need manual processing.", 
+                        savedIngestion.getId(), traceId, e);
+                    // Optionally, you could mark ingestion with a warning flag here
+                }
+            }
+
+            return mapToResponse(savedIngestion);
+            
+        } finally {
+            // Clean up MDC context
+            MDC.remove("tenant_id");
+            MDC.remove("ingestion_id");
+            MDC.remove("trace_id");
         }
-
-        return mapToResponse(savedIngestion);
     }
 
     @Transactional(readOnly = true)
@@ -167,6 +217,36 @@ public class IngestionService {
             .updatedAt(ingestion.getUpdatedAt())
             .processedAt(ingestion.getProcessedAt())
             .build();
+    }
+
+    /**
+     * Sanitizes filename to prevent path traversal attacks and normalize characters.
+     * 
+     * @param fileName original filename
+     * @return sanitized filename
+     */
+    private String sanitizeFileName(String fileName) {
+        if (fileName == null || fileName.isEmpty()) {
+            return "unnamed.pdf";
+        }
+        
+        // Remove path separators and parent directory references
+        String sanitized = fileName.replaceAll("[/\\\\]", "_")
+                                   .replaceAll("\\.\\.", "_")
+                                   .replaceAll("[^a-zA-Z0-9._-]", "_")
+                                   .trim();
+        
+        // Ensure it's not empty after sanitization
+        if (sanitized.isEmpty()) {
+            sanitized = "unnamed.pdf";
+        }
+        
+        // Ensure it has an extension or add .pdf as default
+        if (!sanitized.contains(".")) {
+            sanitized += ".pdf";
+        }
+        
+        return sanitized;
     }
 }
 

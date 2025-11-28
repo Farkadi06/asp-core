@@ -1,7 +1,5 @@
 package com.asp.parsing.extraction;
 
-import com.asp.storage.DocumentStorageService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -22,13 +20,13 @@ import java.util.UUID;
 
 /**
  * Local implementation of PDF text extractor using PDFBox.
+ * NOTE: This extractor reads from local file paths. For S3-based storage,
+ * files should be downloaded to a local path first before extraction.
+ * This is typically handled by the worker which downloads files to /tmp.
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class LocalPdfTextExtractor implements PdfTextExtractor {
-
-    private final DocumentStorageService documentStorageService;
 
     @Value("${asp.storage.local-base-path:./storage}")
     private String localBasePath;

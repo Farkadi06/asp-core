@@ -15,10 +15,10 @@ class MerchantNormalizationServiceTest {
     @BeforeEach
     void setUp() {
         service = new MerchantNormalizationService();
-        service.overrideRules(new MerchantNormalizationService.MerchantRulesConfig(
-            Collections.emptyList(),
-            Collections.emptyMap()
-        ));
+        MerchantNormalizationService.MerchantRulesConfig config = new MerchantNormalizationService.MerchantRulesConfig();
+        config.setIgnoreTokens(Collections.emptyList());
+        config.setMerchantAliases(Collections.emptyMap());
+        service.overrideRules(config);
     }
 
     @Test

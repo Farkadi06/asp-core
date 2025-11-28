@@ -1,13 +1,12 @@
 package com.asp.platform.enrichment.merchant;
 
 import jakarta.annotation.PostConstruct;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
-import org.yaml.snakeyaml.constructor.Constructor;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -37,7 +36,7 @@ public class MerchantNormalizationService {
 
     private static final String RULES_PATH = "enrichment/merchant_rules.yml";
 
-    private final Yaml yaml = new Yaml(new Constructor(MerchantRulesConfig.class, new LoaderOptions()));
+    private final Yaml yaml = new Yaml();
 
     private Set<String> noiseTokens = new HashSet<>(DEFAULT_NOISE_TOKENS);
     private Map<String, List<String>> merchantAliases = new HashMap<>();
@@ -52,13 +51,54 @@ public class MerchantNormalizationService {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private MerchantRulesConfig readConfig() {
         ClassPathResource resource = new ClassPathResource(RULES_PATH);
         if (!resource.exists()) {
             return null;
         }
         try (InputStream inputStream = resource.getInputStream()) {
-            return yaml.load(inputStream);
+            Object loaded = yaml.load(inputStream);
+            if (loaded == null) {
+                return null;
+            }
+
+            MerchantRulesConfig config = new MerchantRulesConfig();
+            if (loaded instanceof Map<?, ?> map) {
+                Object tokens = map.get("ignore_tokens");
+                if (tokens instanceof List<?> list) {
+                    List<String> cleaned = new ArrayList<>();
+                    for (Object item : list) {
+                        if (item != null) {
+                            cleaned.add(item.toString().toUpperCase(Locale.ROOT));
+                        }
+                    }
+                    config.setIgnoreTokens(cleaned);
+                }
+
+                Object aliasesObj = map.get("merchant_aliases");
+                if (aliasesObj instanceof Map<?, ?> aliasMap) {
+                    Map<String, List<String>> parsed = new HashMap<>();
+                    for (Map.Entry<?, ?> entry : aliasMap.entrySet()) {
+                        String key = entry.getKey() != null ? entry.getKey().toString() : null;
+                        if (!StringUtils.hasText(key)) {
+                            continue;
+                        }
+                        Object value = entry.getValue();
+                        List<String> aliasList = new ArrayList<>();
+                        if (value instanceof List<?> values) {
+                            for (Object alias : values) {
+                                if (alias != null) {
+                                    aliasList.add(alias.toString());
+                                }
+                            }
+                        }
+                        parsed.put(key, aliasList);
+                    }
+                    config.setMerchantAliases(parsed);
+                }
+            }
+            return config;
         } catch (IOException ex) {
             log.error("Unable to read merchant rules from {}", RULES_PATH, ex);
             return null;
@@ -70,11 +110,11 @@ public class MerchantNormalizationService {
             return;
         }
         noiseTokens = new HashSet<>(DEFAULT_NOISE_TOKENS);
-        if (config.ignoreTokens != null) {
-            noiseTokens.addAll(config.ignoreTokens);
+        if (config.getIgnoreTokens() != null) {
+            noiseTokens.addAll(config.getIgnoreTokens());
         }
-        merchantAliases = config.merchantAliases != null
-            ? new HashMap<>(config.merchantAliases)
+        merchantAliases = config.getMerchantAliases() != null
+            ? new HashMap<>(config.getMerchantAliases())
             : new HashMap<>();
         log.info("Loaded merchant rules: {} noise tokens, {} merchant aliases",
             noiseTokens.size(), merchantAliases.size());
@@ -143,9 +183,10 @@ public class MerchantNormalizationService {
         return normalized;
     }
 
-    public record MerchantRulesConfig(
-        List<String> ignoreTokens,
-        Map<String, List<String>> merchantAliases
-    ) {}
+    @Data
+    public static class MerchantRulesConfig {
+        private List<String> ignoreTokens = new ArrayList<>();
+        private Map<String, List<String>> merchantAliases = new HashMap<>();
+    }
 }
 

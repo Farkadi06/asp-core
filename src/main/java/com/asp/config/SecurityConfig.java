@@ -31,12 +31,12 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers("/v1/ping").permitAll()  // Allow testing without auth
+                .requestMatchers("/internal/**").permitAll()  // Internal endpoints use token-based auth, not API key
                 .requestMatchers("/v1/api-keys", "/v1/api-keys/**").authenticated()  // API key management requires auth
                 .requestMatchers("/v1/banks/**").authenticated()  // Bank directory requires auth
                 .requestMatchers("/v1/bank-connections/**").authenticated()  // Bank connections require auth
                 .requestMatchers("/v1/ingestions/**").authenticated()  // Ingestion requires auth
                 .requestMatchers("/v1/accounts/**").authenticated()  // Account queries require auth
-                .requestMatchers("/internal/**").authenticated()  // Internal endpoints require auth
                 .requestMatchers("/v1/**").authenticated()
                 .anyRequest().permitAll())
             .addFilterBefore(apiKeyAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

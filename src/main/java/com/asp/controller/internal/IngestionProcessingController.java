@@ -1,65 +1,59 @@
 package com.asp.controller.internal;
 
-import com.asp.domain.IngestionRepository;
-import com.asp.domain.IngestionStatus;
-import com.asp.parsing.processor.DefaultIngestionProcessorService;
+import com.asp.parsing.processor.IngestionProcessorService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
-/**
- * Internal controller for manually triggering ingestion processing.
- */
 @RestController
 @RequestMapping("/internal/ingestions")
 @RequiredArgsConstructor
 @Slf4j
 public class IngestionProcessingController {
 
-    private final DefaultIngestionProcessorService processorService;
-    private final IngestionRepository ingestionRepository;
+    private final IngestionProcessorService ingestionProcessorService;
 
-    @PostMapping("/process")
-    public ResponseEntity<Map<String, Object>> processPendingIngestions() {
-        log.info("[MANUAL] Triggered ingestion processor run");
+    @Value("${ASP_INTERNAL_ACCESS_TOKEN}")
+    private String internalAccessToken;
+
+    @PostMapping("/{ingestionId}/process")
+    public ResponseEntity<Map<String, String>> processIngestion(
+            @PathVariable UUID ingestionId,
+            @RequestHeader("X-Internal-Token") String xInternalToken) {
+
+        // Validate internal token
+        if (!internalAccessToken.equals(xInternalToken)) {
+            log.warn("Unauthorized access attempt to /internal/ingestions/{}/process with invalid token", ingestionId);
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid internal access token");
+        }
+
+        log.info("[PROCESS] Triggering processing for ingestion: {}", ingestionId);
 
         try {
-            // Count pending ingestions before processing
-            long pendingCount = ingestionRepository.findAllByStatus(IngestionStatus.PENDING).size();
-            
-            // Process pending ingestions
-            processorService.processPendingIngestions();
-            
-            // Count remaining pending ingestions after processing
-            long remainingPendingCount = ingestionRepository.findAllByStatus(IngestionStatus.PENDING).size();
-            long processedCount = pendingCount - remainingPendingCount;
+            // Process ingestion asynchronously (or synchronously - depends on implementation)
+            ingestionProcessorService.processIngestion(ingestionId);
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("processed", processedCount);
-            response.put("status", "OK");
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "queued");
+            response.put("ingestionId", ingestionId.toString());
 
-            log.info("[MANUAL] Processed {} ingestions ({} pending before, {} remaining)", 
-                processedCount, pendingCount, remainingPendingCount);
-
+            log.info("[PROCESS] Processing triggered successfully for ingestion: {}", ingestionId);
             return ResponseEntity.ok(response);
 
+        } catch (IllegalArgumentException e) {
+            log.warn("[PROCESS] Ingestion not found: {}", ingestionId);
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Ingestion not found");
         } catch (Exception e) {
-            log.error("[MANUAL] Error processing ingestions", e);
-            
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("processed", 0);
-            errorResponse.put("status", "ERROR");
-            errorResponse.put("error", e.getMessage());
-
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+            log.error("[PROCESS] Error triggering processing for ingestion: {}", ingestionId, e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to trigger processing");
         }
     }
 }
-
