@@ -7,6 +7,7 @@ import com.asp.platform.enrichment.category.CategoryClassifierService;
 import com.asp.platform.enrichment.domain.EnrichedTransaction;
 import com.asp.platform.enrichment.merchant.MerchantFuzzyMatcher;
 import com.asp.platform.enrichment.merchant.MerchantNormalizationService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -14,6 +15,7 @@ import java.util.HashMap;
 import java.util.Optional;
 
 @Component
+@Slf4j
 public class EnrichedTransactionMapper {
 
     private final CategoryClassifierService categoryClassifierService;
@@ -49,21 +51,14 @@ public class EnrichedTransactionMapper {
 
         CategoryClassificationResult classification = categoryClassifierService.classify(rawDescription);
         String cleanedMerchant = merchantNormalizationService.cleanMerchant(rawDescription);
-        String normalizedMerchant = merchantNormalizationService.normalizeMerchant(cleanedMerchant);
-
-        // Check if fuzzy matching was used (normalizeMerchant already applies fuzzy matching if needed)
-        // We check if the normalized merchant would match via fuzzy matching to determine if it was used
-        Optional<MerchantFuzzyMatcher.MerchantMatch> fuzzyMatch = Optional.empty();
-        if (normalizedMerchant != null) {
-            fuzzyMatch = fuzzyMatcher.match(normalizedMerchant);
-            // Only include if it's a fuzzy match (not exact match to canonical)
-            if (fuzzyMatch.isPresent() && !fuzzyMatch.get().getCanonical().equals(normalizedMerchant)) {
-                // This indicates fuzzy matching was likely used
-            } else if (fuzzyMatch.isPresent() && fuzzyMatch.get().getCanonical().equals(normalizedMerchant)) {
-                // Exact match - fuzzy matching may not have been used, clear it
-                fuzzyMatch = Optional.empty();
-            }
-        }
+        
+        // Get normalization result with fuzzy matching information
+        MerchantNormalizationService.MerchantNormalizationResult normResult = 
+            merchantNormalizationService.normalize(cleanedMerchant);
+        
+        String normalizedMerchant = normResult != null ? normResult.canonical() : null;
+        Optional<MerchantFuzzyMatcher.MerchantMatch> fuzzyMatch = 
+            normResult != null ? normResult.fuzzyMatch() : Optional.empty();
 
         return EnrichedTransaction.builder()
             .normalizedTransaction(normalizedTransaction)
@@ -92,16 +87,25 @@ public class EnrichedTransactionMapper {
                                                   String normalizedMerchant,
                                                   Optional<MerchantFuzzyMatcher.MerchantMatch> fuzzyMatch) {
         HashMap<String, Object> metadata = new HashMap<>();
+        
+        // Category metadata
         metadata.put("category_pattern", classification.getMatchedPattern());
         metadata.put("category_confidence", classification.getConfidence().name());
         metadata.put("merchant_normalized", normalizedMerchant);
         
-        // Add fuzzy matching metadata if available
+        // Fuzzy matching metadata
         if (fuzzyMatch.isPresent()) {
             MerchantFuzzyMatcher.MerchantMatch match = fuzzyMatch.get();
+            metadata.put("fuzzy_used", true);
             metadata.put("fuzzy_score", match.getScore());
             metadata.put("fuzzy_candidate", match.getCanonical());
             metadata.put("fuzzy_confidence", match.getConfidence().name());
+            
+            log.debug("[ENRICH][FUZZY] canonical={}, score={}, confidence={}",
+                match.getCanonical(), match.getScore(), match.getConfidence());
+        } else {
+            metadata.put("fuzzy_used", false);
+            log.debug("[ENRICH][FUZZY] No fuzzy match used.");
         }
         
         return metadata;

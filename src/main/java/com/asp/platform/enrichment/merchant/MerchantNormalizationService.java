@@ -191,6 +191,18 @@ public class MerchantNormalizationService {
     }
 
     public String normalizeMerchant(String cleaned) {
+        MerchantNormalizationResult result = normalize(cleaned);
+        return result != null ? result.canonical() : null;
+    }
+
+    /**
+     * Normalize merchant name with fuzzy matching support.
+     * Returns both the canonical merchant name and fuzzy match information.
+     *
+     * @param cleaned Cleaned merchant name (from cleanMerchant())
+     * @return MerchantNormalizationResult with canonical name and optional fuzzy match
+     */
+    public MerchantNormalizationResult normalize(String cleaned) {
         if (!StringUtils.hasText(cleaned)) {
             return null;
         }
@@ -210,10 +222,11 @@ public class MerchantNormalizationService {
 
         // Apply merchant alias mapping
         String canonical = resolveAlias(normalized);
+        Optional<MerchantFuzzyMatcher.MerchantMatch> fuzzyMatch = Optional.empty();
 
         // If alias resolution didn't find a match, try fuzzy matching
         if (canonical.equals(normalized)) {
-            Optional<MerchantFuzzyMatcher.MerchantMatch> fuzzyMatch = fuzzyMatcher.match(normalized);
+            fuzzyMatch = fuzzyMatcher.match(normalized);
             if (fuzzyMatch.isPresent()) {
                 MerchantFuzzyMatcher.MerchantMatch match = fuzzyMatch.get();
                 log.debug("[MERCHANT] fuzzy match: \"{}\" -> \"{}\" (score={}, confidence={})",
@@ -224,7 +237,7 @@ public class MerchantNormalizationService {
         }
 
         log.debug("[MERCHANT] normalized=\"{}\"", canonical);
-        return canonical;
+        return new MerchantNormalizationResult(canonical, fuzzyMatch);
     }
 
     private String resolveAlias(String normalized) {
@@ -294,6 +307,14 @@ public class MerchantNormalizationService {
         return Normalizer.normalize(text, Normalizer.Form.NFD)
             .replaceAll("\\p{M}", "");
     }
+
+    /**
+     * Result of merchant normalization including fuzzy matching information.
+     */
+    public record MerchantNormalizationResult(
+        String canonical,
+        Optional<MerchantFuzzyMatcher.MerchantMatch> fuzzyMatch
+    ) {}
 
     @Data
     public static class MerchantRulesConfig {
