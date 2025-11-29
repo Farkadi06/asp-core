@@ -2,6 +2,7 @@ package com.asp.platform.enrichment.merchant;
 
 import jakarta.annotation.PostConstruct;
 import lombok.Data;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
@@ -19,19 +20,43 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.Optional;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class MerchantNormalizationService {
+
+    private final MerchantFuzzyMatcher fuzzyMatcher;
 
     private static final List<String> DEFAULT_NOISE_TOKENS = List.of(
         "PAIEMENT", "PAR", "CARTE", "ECOM", "NATIONAL", "INTERNATIONAL",
         "CIH", "GAB", "MAROC", "T", "L", "COM", "0332", "PAY", "RECHARGE"
     );
 
+    private static final List<String> CITY_TOKENS = List.of(
+        "CASA", "CASABLANCA", "RABAT", "MARRAKECH", "MARRAKESH", "AGADIR", "TANGER", "TANGIER",
+        "OUJDA", "FEZ", "FES", "MEKNES", "TETOUAN", "KENITRA", "SAFI", "EL_JADIDA", "BENI_MELLAL",
+        "NADOR", "KHOURIBGA", "SETTAT", "LARACHE", "TAZA", "ERRACHIDIA", "BERKANE", "SIDI_SLIMANE",
+        "KHEMISSET", "TAOUNATE", "TAROUDANT", "OUARZAZATE", "ESSAOUIRA", "KHENIFRA", "BERRECHID",
+        "FNIDEQ", "MARTIL", "ASILAH", "CHEFCHAOUEN", "IFRANE", "AZROU", "MIDELT", "FIGUIG",
+        "BOUDNIB", "RISSANI", "TINGHIR", "ZAGORA", "TATA", "GUELMIM", "SMARA", "LAAYOUNE",
+        "DAKHLA", "AKHFENIR", "TARFAYA", "TAN_TAN", "SIDI_IFNI", "TIZNIT", "MOHAMMEDIA"
+    );
+
+    private static final List<String> COUNTRY_TOKENS = List.of(
+        "MA", "MAROC", "MOROCCO", "MAR"
+    );
+
+    private static final List<String> PAYMENT_TOKENS = List.of(
+        "POS", "ECOM", "ATM", "GAB", "TPE", "CARD", "DEBIT", "CREDIT"
+    );
+
     private static final Pattern AMOUNT_PATTERN = Pattern.compile("\\b\\d{1,3}(?:[\\s.,]\\d{3})*(?:[.,]\\d{2})\\b");
     private static final Pattern DATE_PREFIX_PATTERN = Pattern.compile("^\\d{2}/\\d{2}\\S*\\s+");
     private static final Pattern MULTIPLE_SPACES = Pattern.compile("\\s+");
+    private static final Pattern MULTIPLE_HYPHENS = Pattern.compile("-{2,}");
+    private static final Pattern MULTIPLE_UNDERSCORES = Pattern.compile("_{2,}");
     private static final Pattern NON_ALPHANUM_UNDERSCORE = Pattern.compile("[^a-z0-9_]");
 
     private static final String RULES_PATH = "enrichment/merchant_rules.yml";
@@ -129,24 +154,39 @@ public class MerchantNormalizationService {
             return null;
         }
 
-        log.debug("[MerchantNormalization] Raw description: {}", rawDescription);
+        log.debug("[MERCHANT] raw=\"{}\"", rawDescription);
+
+        // Normalize Unicode and uppercase
+        String working = normalizeUnicode(rawDescription.toUpperCase(Locale.ROOT));
 
         // Remove date prefixes
-        String working = Normalizer.normalize(rawDescription.toUpperCase(Locale.ROOT), Normalizer.Form.NFD)
-            .replaceAll("\\p{M}", "");
-
         String cleaned = DATE_PREFIX_PATTERN.matcher(working).replaceFirst("");
+
+        // Remove amounts
         cleaned = AMOUNT_PATTERN.matcher(cleaned).replaceAll(" ");
+
+        // Remove city tokens
+        cleaned = removeCityTokens(cleaned);
+
+        // Remove country tokens
+        cleaned = removeCountryTokens(cleaned);
+
+        // Remove payment tokens
+        cleaned = removePaymentTokens(cleaned);
 
         // Remove noise tokens
         for (String token : noiseTokens) {
             cleaned = cleaned.replaceAll("\\b" + Pattern.quote(token) + "\\b", " ");
         }
 
-        // Collapse spaces and trim
-        cleaned = MULTIPLE_SPACES.matcher(cleaned).replaceAll(" ").trim();
+        // Normalize multiple hyphens and underscores
+        cleaned = MULTIPLE_HYPHENS.matcher(cleaned).replaceAll("-");
+        cleaned = MULTIPLE_UNDERSCORES.matcher(cleaned).replaceAll("_");
 
-        log.debug("[MerchantNormalization] Cleaned merchant: {}", cleaned);
+        // Collapse spaces and trim
+        cleaned = squeezeSpaces(cleaned);
+
+        log.debug("[MERCHANT] cleaned=\"{}\"", cleaned);
         return cleaned.isBlank() ? null : cleaned;
     }
 
@@ -155,16 +195,35 @@ public class MerchantNormalizationService {
             return null;
         }
 
+        // Convert to lowercase and normalize Unicode
         String lower = cleaned.toLowerCase(Locale.ROOT);
-        String normalized = Normalizer.normalize(lower, Normalizer.Form.NFD)
-            .replaceAll("\\p{M}", "")
-            .replace(' ', '_');
+        String normalized = normalizeUnicode(lower);
+
+        // Replace spaces with underscores
+        normalized = normalized.replace(' ', '_');
+
+        // Remove non-alphanumeric characters (keep underscores)
         normalized = NON_ALPHANUM_UNDERSCORE.matcher(normalized).replaceAll("");
+
+        // Normalize multiple underscores
+        normalized = MULTIPLE_UNDERSCORES.matcher(normalized).replaceAll("_");
 
         // Apply merchant alias mapping
         String canonical = resolveAlias(normalized);
 
-        log.debug("[MerchantNormalization] Normalized merchant: {}", canonical);
+        // If alias resolution didn't find a match, try fuzzy matching
+        if (canonical.equals(normalized)) {
+            Optional<MerchantFuzzyMatcher.MerchantMatch> fuzzyMatch = fuzzyMatcher.match(normalized);
+            if (fuzzyMatch.isPresent()) {
+                MerchantFuzzyMatcher.MerchantMatch match = fuzzyMatch.get();
+                log.debug("[MERCHANT] fuzzy match: \"{}\" -> \"{}\" (score={}, confidence={})",
+                    normalized, match.getCanonical(), 
+                    String.format("%.3f", match.getScore()), match.getConfidence());
+                canonical = match.getCanonical();
+            }
+        }
+
+        log.debug("[MERCHANT] normalized=\"{}\"", canonical);
         return canonical;
     }
 
@@ -175,12 +234,65 @@ public class MerchantNormalizationService {
 
         for (Map.Entry<String, List<String>> entry : merchantAliases.entrySet()) {
             for (String alias : entry.getValue()) {
-                if (normalized.equalsIgnoreCase(alias)) {
+                // Normalize alias for comparison
+                String normalizedAlias = normalizeUnicode(alias.toLowerCase(Locale.ROOT))
+                    .replace(' ', '_');
+                normalizedAlias = NON_ALPHANUM_UNDERSCORE.matcher(normalizedAlias).replaceAll("");
+                
+                if (normalized.equalsIgnoreCase(normalizedAlias)) {
                     return entry.getKey();
                 }
             }
         }
         return normalized;
+    }
+
+    /**
+     * Remove city tokens from merchant description.
+     */
+    private String removeCityTokens(String text) {
+        String result = text;
+        for (String city : CITY_TOKENS) {
+            result = result.replaceAll("\\b" + Pattern.quote(city) + "\\b", " ");
+        }
+        return result;
+    }
+
+    /**
+     * Remove country tokens from merchant description.
+     */
+    private String removeCountryTokens(String text) {
+        String result = text;
+        for (String country : COUNTRY_TOKENS) {
+            result = result.replaceAll("\\b" + Pattern.quote(country) + "\\b", " ");
+        }
+        return result;
+    }
+
+    /**
+     * Remove payment-related tokens from merchant description.
+     */
+    private String removePaymentTokens(String text) {
+        String result = text;
+        for (String payment : PAYMENT_TOKENS) {
+            result = result.replaceAll("\\b" + Pattern.quote(payment) + "\\b", " ");
+        }
+        return result;
+    }
+
+    /**
+     * Collapse multiple spaces into single space.
+     */
+    private String squeezeSpaces(String text) {
+        return MULTIPLE_SPACES.matcher(text).replaceAll(" ").trim();
+    }
+
+    /**
+     * Normalize Unicode characters (remove accents and diacritics).
+     */
+    private String normalizeUnicode(String text) {
+        return Normalizer.normalize(text, Normalizer.Form.NFD)
+            .replaceAll("\\p{M}", "");
     }
 
     @Data

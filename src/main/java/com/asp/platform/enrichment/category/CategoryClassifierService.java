@@ -15,6 +15,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -48,7 +49,10 @@ public class CategoryClassifierService {
         String normalized = normalize(description);
 
         for (CategoryRule rule : rules) {
-            if (normalized.contains(rule.getPattern())) {
+            if (matchesRule(normalized, rule)) {
+                log.debug("[CATEGORY] matched=\"{}\" category=\"{}\" subcategory=\"{}\"",
+                    rule.getPattern(), rule.getCategory(), rule.getSubcategory());
+                
                 return CategoryClassificationResult.builder()
                     .category(rule.getCategory())
                     .subcategory(rule.getSubcategory())
@@ -61,6 +65,45 @@ public class CategoryClassifierService {
         return defaultResult();
     }
 
+    /**
+     * Check if normalized description matches the rule pattern.
+     * Supports regex matching and word-boundary matching.
+     */
+    private boolean matchesRule(String normalized, CategoryRule rule) {
+        String pattern = rule.getPattern();
+        if (pattern == null || pattern.isEmpty()) {
+            return false;
+        }
+
+        // If regex is enabled, use Pattern matching
+        if (Boolean.TRUE.equals(rule.getRegex())) {
+            try {
+                Pattern regexPattern;
+                if (Boolean.TRUE.equals(rule.getWordMatch())) {
+                    // Add word boundaries for word-match mode
+                    regexPattern = Pattern.compile("\\b" + pattern + "\\b", Pattern.CASE_INSENSITIVE);
+                } else {
+                    regexPattern = Pattern.compile(pattern, Pattern.CASE_INSENSITIVE);
+                }
+                return regexPattern.matcher(normalized).find();
+            } catch (Exception e) {
+                log.warn("Invalid regex pattern: {}, falling back to substring match", pattern);
+                // Fallback to substring matching
+                return normalized.contains(pattern);
+            }
+        }
+
+        // If word-match is enabled (without regex), use word-boundary substring matching
+        if (Boolean.TRUE.equals(rule.getWordMatch())) {
+            String wordBoundaryPattern = "\\b" + Pattern.quote(pattern) + "\\b";
+            return Pattern.compile(wordBoundaryPattern, Pattern.CASE_INSENSITIVE)
+                .matcher(normalized).find();
+        }
+
+        // Default: simple substring matching (case-insensitive after normalization)
+        return normalized.contains(pattern);
+    }
+
     private CategoryClassificationResult defaultResult() {
         return CategoryClassificationResult.builder()
             .category("Other")
@@ -71,12 +114,15 @@ public class CategoryClassifierService {
     }
 
     private CategoryClassificationResult.DetectionConfidence confidenceFor(int priority) {
+        // HIGH → priority ≥ 95
         if (priority >= 95) {
             return CategoryClassificationResult.DetectionConfidence.HIGH;
         }
+        // MEDIUM → priority ≥ 70
         if (priority >= 70) {
             return CategoryClassificationResult.DetectionConfidence.MEDIUM;
         }
+        // LOW → below 70
         return CategoryClassificationResult.DetectionConfidence.LOW;
     }
 

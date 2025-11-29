@@ -1,9 +1,671 @@
 ignore_tokens:
   - "SUPERMARCHE"
   - "HYPER"
+  - "PAIEMENT"
+  - "PAR"
+  - "CARTE"
+  - "ECOM"
+  - "INTERNATIONAL"
+  - "NATIONAL"
+  - "GAB"
+  - "CIH"
+  - "BANK"
+  - "MAROC"
+  - "MA"
+  - "MOROCCO"
+  - "STORE"
+  - "AGENCE"
+  - "TPE"
+  - "POS"
+  - "ATM"
+  - "REF"
+  - "FACTURE"
+  - "FACT"
+  - "RETRAIT"
+  - "PAY"
+  - "PAYMENT"
+  - "ELECTRON"
+  - "ACHAT"
+  - "DEPOT"
+  - "VIR"
+  - "VIREMENT"
+  - "OPERATION"
+  - "CASA"
+  - "CASABLANCA"
+  - "RABAT"
+  - "MARRAKECH"
+  - "MARRAKESH"
+  - "AGADIR"
+  - "TANGER"
+  - "TANGIER"
+  - "OUJDA"
+  - "OUJDA"
+  - "FEZ"
+  - "FES"
+  - "MEKNES"
+  - "TETOUAN"
+  - "KENITRA"
+  - "SAFI"
+  - "EL_JADIDA"
+  - "BENI_MELLAL"
+  - "NADOR"
+  - "KHOURIBGA"
+  - "SETTAT"
+  - "LARACHE"
+  - "TAZA"
+  - "ERRACHIDIA"
+  - "BERKANE"
+  - "SIDI_SLIMANE"
+  - "KHEMISSET"
+  - "TAOUNATE"
+  - "TAROUDANT"
+  - "OUARZAZATE"
+  - "ESSAOUIRA"
+  - "KHENIFRA"
+  - "BERRECHID"
+  - "FNIDEQ"
+  - "MARTIL"
+  - "LARACHE"
+  - "ASILAH"
+  - "CHEFCHAOUEN"
+  - "IFRANE"
+  - "AZROU"
+  - "MIDELT"
+  - "ERRACHIDIA"
+  - "FIGUIG"
+  - "BOUDNIB"
+  - "RISSANI"
+  - "TINGHIR"
+  - "ZAGORA"
+  - "TATA"
+  - "GUELMIM"
+  - "SMARA"
+  - "LAAYOUNE"
+  - "DAKHLA"
+  - "AKHFENIR"
+  - "TARFAYA"
+  - "TAN_TAN"
+  - "SIDI_IFNI"
+  - "TIZNIT"
+  - "TIFNIT"
+  - "IMOUZZER"
+  - "DEMNATE"
+  - "BEN_GUERIR"
+  - "YOUSSOUFIA"
+  - "JORF_EL_MELHA"
+  - "MEHDIA"
+  - "MOULAY_BOUSELHAM"
+  - "LIXUS"
+  - "VOLUBILIS"
+  - "MOULAY_IDRISS"
+  - "SIDI_KACEM"
+  - "KSAR_EL_KEBIR"
+  - "LARACHE"
+  - "ASILAH"
+  - "TANGER"
+  - "TETOUAN"
+  - "CHEFCHAOUEN"
+  - "OUAZZANE"
+  - "TAOUNATE"
+  - "TAZA"
+  - "GUERCIF"
+  - "FIGUIG"
+  - "BOUDNIB"
+  - "RISSANI"
+  - "ERRACHIDIA"
+  - "MIDELT"
+  - "AZROU"
+  - "IFRANE"
+  - "SEFROU"
+  - "BOULMANE"
+  - "IMOUZZER_KANDAR"
+  - "EL_HAJEB"
+  - "MEKNES"
+  - "MOULAY_DRISS_ZERHOUN"
+  - "RABAT"
+  - "SALE"
+  - "TEMARA"
+  - "SKHIRAT"
+  - "BOUZNIKA"
+  - "BERRECHID"
+  - "SETTAT"
+  - "BEN_SLIMANE"
+  - "KHOURIBGA"
+  - "BENI_MELLAL"
+  - "FQUIH_BEN_SALEH"
+  - "SOUK_SEBT"
+  - "KASBA_TADLA"
+  - "EL_KELAA_DES_SRAGHNA"
+  - "YOUSSOUFIA"
+  - "SAFI"
+  - "JAMAAT_SHAIM"
+  - "SEBT_GZOULA"
+  - "EL_JADIDA"
+  - "AZEMMOUR"
+  - "BIR_J DID"
+  - "SIDI_BENNOUR"
+  - "CASABLANCA"
+  - "MOHAMMEDIA"
+  - "BENSLIMANE"
+  - "BERKANE"
+  - "NADOR"
+  - "AL_HOCEIMA"
+  - "IMZOUREN"
+  - "TARGUIST"
+  - "BAB_BERED"
+  - "TAZA"
+  - "GUERCIF"
+  - "TAOURIRT"
+  - "DEBDOU"
+  - "JERADA"
+  - "FIGUIG"
+  - "BOUDNIB"
+  - "RISSANI"
+  - "ERRACHIDIA"
+  - "MIDELT"
+  - "RICH"
+  - "AZROU"
+  - "IFRANE"
+  - "SEFROU"
+  - "BOULMANE"
+  - "IMOUZZER_KANDAR"
+  - "EL_HAJEB"
+  - "MEKNES"
+  - "MOULAY_DRISS_ZERHOUN"
+  - "RABAT"
+  - "SALE"
+  - "TEMARA"
+  - "SKHIRAT"
+  - "BOUZNIKA"
+  - "BERRECHID"
+  - "SETTAT"
+  - "BEN_SLIMANE"
+  - "KHOURIBGA"
+  - "BENI_MELLAL"
+  - "FQUIH_BEN_SALEH"
+  - "SOUK_SEBT"
+  - "KASBA_TADLA"
+  - "EL_KELAA_DES_SRAGHNA"
+  - "YOUSSOUFIA"
+  - "SAFI"
+  - "JAMAAT_SHAIM"
+  - "SEBT_GZOULA"
+  - "EL_JADIDA"
+  - "AZEMMOUR"
+  - "BIR_J DID"
+  - "SIDI_BENNOUR"
+  - "CASABLANCA"
+  - "MOHAMMEDIA"
+  - "BENSLIMANE"
 
 merchant_aliases:
+
+  # Supermarkets & Hypermarkets
   marjane:
+    - "marjane"
+    - "marjane market"
+    - "marjane hyper"
+    - "marjane hypermarche"
+    - "marjane super"
+    - "marjane supermarche"
     - "marjane_market"
     - "marjane_hyper"
+    - "marjane_super"
+    - "mj"
+    - "marjane express"
+    - "marjane city"
+    - "marjane drive"
 
+  carrefour:
+    - "carrefour"
+    - "carrefour market"
+    - "carrefour hyper"
+    - "carrefour hypermarche"
+    - "carrefour express"
+    - "carrefour city"
+    - "carrefour contact"
+    - "crf"
+    - "carrefour_express"
+    - "carrefour_market"
+    - "carrefour_hyper"
+
+  bim:
+    - "bim"
+    - "bim store"
+    - "bim market"
+    - "bim supermarche"
+    - "bim_store"
+    - "bim_market"
+
+  labelvie:
+    - "label vie"
+    - "labelvie"
+    - "carrefour label vie"
+    - "label_vie"
+    - "label_vie_express"
+
+  marwa:
+    - "marwa"
+    - "marwa store"
+    - "marwa market"
+    - "marwa_store"
+    - "marwa_market"
+
+  acima:
+    - "acima"
+    - "acima market"
+    - "acima supermarche"
+    - "acima_express"
+
+  atacadao:
+    - "atacadao"
+    - "atacadao maroc"
+    - "atacadao_market"
+
+  metro:
+    - "metro"
+    - "metro cash and carry"
+    - "metro maroc"
+
+  # Telecom & Recharge
+  inwi:
+    - "inwi"
+    - "inwi recharge"
+    - "inwi telecom"
+    - "recharge inwi"
+    - "inwi_maroc"
+    - "inwi_mobile"
+    - "inwi_internet"
+
+  orange:
+    - "orange"
+    - "orange maroc"
+    - "orange recharge"
+    - "recharge orange"
+    - "orange telecom"
+    - "orange_mobile"
+    - "orange_internet"
+    - "orange_fix"
+
+  iam:
+    - "iam"
+    - "iam maroc telecom"
+    - "iam recharge"
+    - "recharge iam"
+    - "maroc telecom"
+    - "iam telecom"
+    - "iam_mobile"
+    - "iam_internet"
+    - "iam_fix"
+    - "mtt"
+    - "maroc_telecom"
+
+  # Food Delivery
+  glovo:
+    - "glovo"
+    - "glovo app"
+    - "glovoapp"
+    - "glovo_maroc"
+    - "glovo_delivery"
+
+  uber_eats:
+    - "uber eats"
+    - "ubereats"
+    - "uber_eats"
+    - "uber_eats_maroc"
+
+  # Restaurants & Fast Food
+  macdonalds:
+    - "mcdonald"
+    - "mc donald"
+    - "mcdonalds"
+    - "mcdo"
+    - "mcdonald maroc"
+    - "mcdonald_s"
+    - "mcd"
+
+  kfc:
+    - "kfc"
+    - "kentucky fried chicken"
+    - "kfc maroc"
+    - "kfc_maroc"
+
+  boost_coffee:
+    - "boost coffee"
+    - "boost coffee ghandi"
+    - "boost_coffee"
+    - "boost_coffee_ghandi"
+    - "boost"
+
+  starbucks:
+    - "starbucks"
+    - "starbucks coffee"
+    - "starbucks maroc"
+    - "starbucks_maroc"
+
+  pizza_hut:
+    - "pizza hut"
+    - "pizzahut"
+    - "pizza_hut"
+    - "pizza_hut_maroc"
+
+  domino_pizza:
+    - "domino pizza"
+    - "dominopizza"
+    - "domino_pizza"
+    - "domino"
+
+  burger_king:
+    - "burger king"
+    - "burgerking"
+    - "burger_king"
+    - "bk"
+
+  subway:
+    - "subway"
+    - "subway maroc"
+    - "subway_sandwich"
+
+  # Fuel Stations
+  afriquia:
+    - "afriquia"
+    - "afriquia station"
+    - "station afriquia"
+    - "afriquia_maroc"
+    - "afriquia_gaz"
+
+  winxo:
+    - "winxo"
+    - "winxo station"
+    - "station winxo"
+    - "winxo_maroc"
+
+  shell:
+    - "shell"
+    - "shell station"
+    - "station shell"
+    - "shell maroc"
+    - "shell_maroc"
+
+  total:
+    - "total"
+    - "total energies"
+    - "total station"
+    - "station total"
+    - "total maroc"
+    - "total_energies"
+    - "total_maroc"
+
+  petrom:
+    - "petrom"
+    - "petrom station"
+    - "station petrom"
+    - "petrom_maroc"
+
+  bp_gaz:
+    - "bp gaz"
+    - "bp"
+    - "bp station"
+    - "station bp"
+    - "bp_maroc"
+
+  # Shopping & Retail
+  decathlon:
+    - "decathlon"
+    - "decathlon maroc"
+    - "decathlon_maroc"
+    - "dktn"
+
+  planet_sport:
+    - "planet sport"
+    - "planet_sport"
+    - "psport"
+    - "planet_sport_maroc"
+
+  zara:
+    - "zara"
+    - "zara maroc"
+    - "zara_maroc"
+
+  h_m:
+    - "h&m"
+    - "h and m"
+    - "h&m maroc"
+    - "hm"
+    - "h_m"
+
+  pull_bear:
+    - "pull and bear"
+    - "pull&bear"
+    - "pull_bear"
+    - "pull_bear_maroc"
+
+  bershka:
+    - "bershka"
+    - "bershka maroc"
+    - "bershka_maroc"
+
+  stradivarius:
+    - "stradivarius"
+    - "stradivarius maroc"
+    - "stradivarius_maroc"
+
+  massimo_dutti:
+    - "massimo dutti"
+    - "massimo_dutti"
+    - "massimo_dutti_maroc"
+
+  oysho:
+    - "oysho"
+    - "oysho maroc"
+    - "oysho_maroc"
+
+  # E-commerce
+  shein:
+    - "shein"
+    - "shein express"
+    - "shein_maroc"
+    - "shein_express"
+
+  jumia:
+    - "jumia"
+    - "jumia store"
+    - "jumia maroc"
+    - "jumia_maroc"
+    - "jumia_market"
+
+  amazon:
+    - "amazon"
+    - "amazon eu"
+    - "amazon fr"
+    - "amazon com"
+    - "amzn"
+    - "amazon_maroc"
+
+  aliexpress:
+    - "aliexpress"
+    - "ali express"
+    - "aliexpress_maroc"
+
+  # Subscriptions & Digital Services
+  netflix:
+    - "netflix"
+    - "netflix subscription"
+    - "netflix_maroc"
+    - "netflix_com"
+
+  spotify:
+    - "spotify"
+    - "spotify plan"
+    - "spotify premium"
+    - "spotify_maroc"
+
+  youtube:
+    - "youtube"
+    - "youtube premium"
+    - "youtube_maroc"
+    - "youtube_premium"
+
+  apple:
+    - "apple.com"
+    - "apple"
+    - "apple services"
+    - "apple store"
+    - "app_store"
+    - "itunes"
+    - "apple_music"
+
+  google:
+    - "google"
+    - "google play"
+    - "google services"
+    - "google_play"
+    - "google_cloud"
+    - "gcp"
+
+  microsoft:
+    - "microsoft"
+    - "microsoft store"
+    - "microsoft services"
+    - "microsoft_365"
+    - "office365"
+    - "office_365"
+
+  adobe:
+    - "adobe"
+    - "adobe creative cloud"
+    - "adobe_cloud"
+    - "adobe_cc"
+
+  # Transport
+  uber:
+    - "uber"
+    - "uber trip"
+    - "uber technologies"
+    - "uber_maroc"
+    - "uber_ride"
+
+  careem:
+    - "careem"
+    - "careem maroc"
+    - "careem_maroc"
+    - "careem_ride"
+
+  heetch:
+    - "heetch"
+    - "heetch maroc"
+    - "heetch_maroc"
+
+  # Convenience Stores
+  oxxo:
+    - "oxxo"
+    - "oxxo market"
+    - "oxxo_maroc"
+    - "oxxo_store"
+
+  # Pharmacies
+  pharmacie:
+    - "pharmacie"
+    - "pharmacy"
+    - "pharma"
+    - "pharmacie_maroc"
+
+  # Banks & ATMs
+  cih_atm:
+    - "cih atm"
+    - "atm cih"
+    - "gab cih"
+    - "cih_gab"
+    - "cih_bank"
+
+  bmce_atm:
+    - "bmce atm"
+    - "atm bmce"
+    - "gab bmce"
+    - "bmce_gab"
+    - "bmce_bank"
+
+  bcp_atm:
+    - "bcp atm"
+    - "gab bcp"
+    - "atm bcp"
+    - "bcp_gab"
+    - "bcp_bank"
+
+  sg_atm:
+    - "sg atm"
+    - "attijari atm"
+    - "gab attijari"
+    - "attijari_gab"
+    - "attijari_bank"
+    - "awb_atm"
+    - "awb_gab"
+
+  bp_atm:
+    - "bp atm"
+    - "banque populaire atm"
+    - "gab bp"
+    - "bp_gab"
+    - "bp_bank"
+
+  # Electronics & Technology
+  fnac:
+    - "fnac"
+    - "fnac maroc"
+    - "fnac_maroc"
+
+  darty:
+    - "darty"
+    - "darty maroc"
+    - "darty_maroc"
+
+  # Furniture & Home
+  ikea:
+    - "ikea"
+    - "ikea maroc"
+    - "ikea_maroc"
+
+  # Coffee Shops
+  cafe_maure:
+    - "cafe maure"
+    - "cafe_maure"
+    - "maure"
+
+  cafe_nespresso:
+    - "nespresso"
+    - "cafe nespresso"
+    - "nespresso_maroc"
+
+  # Additional Moroccan Chains
+  aswak_assalam:
+    - "aswak assalam"
+    - "aswak_assalam"
+    - "aswak"
+
+  hanouty:
+    - "hanouty"
+    - "hanouty store"
+    - "hanouty_maroc"
+
+  # Additional International Chains
+  starbucks:
+    - "starbucks"
+    - "starbucks coffee"
+    - "starbucks maroc"
+    - "starbucks_maroc"
+
+  costa_coffee:
+    - "costa coffee"
+    - "costa"
+    - "costa_maroc"
+
+  # Additional E-commerce
+  noon:
+    - "noon"
+    - "noon maroc"
+    - "noon_maroc"
+
+  namshi:
+    - "namshi"
+    - "namshi maroc"
+    - "namshi_maroc"

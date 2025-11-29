@@ -11,5 +11,7 @@ public class CategoryRule {
     private String category;
     private String subcategory;
     private int priority;
+    private Boolean regex;  // Optional: if true, treat pattern as regex
+    private Boolean wordMatch;  // Optional: if true, use word boundaries
 }
 

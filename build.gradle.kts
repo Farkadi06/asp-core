@@ -49,6 +49,9 @@ dependencies {
     
     // PDF Processing
     implementation("org.apache.pdfbox:pdfbox:3.0.1")
+    
+    // Text Similarity (Fuzzy Matching)
+    implementation("org.apache.commons:commons-text:1.11.0")
 
     // AWS SDK v2
     implementation("software.amazon.awssdk:sqs:2.20.0")

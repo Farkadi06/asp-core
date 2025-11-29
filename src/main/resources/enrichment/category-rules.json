@@ -1,16 +1,56 @@
 [
   { "pattern": "GLOVO", "category": "Food Delivery", "subcategory": "Glovo", "priority": 100 },
-  { "pattern": "CARREFOUR", "category": "Food & Groceries", "subcategory": "Carrefour", "priority": 90 },
-  { "pattern": "PLANET SPORT", "category": "Shopping", "subcategory": "Sportswear", "priority": 90 },
+  { "pattern": "UBER EATS", "category": "Food Delivery", "subcategory": "Uber Eats", "priority": 100 },
+  { "pattern": "UBEREATS", "category": "Food Delivery", "subcategory": "Uber Eats", "priority": 100 },
+
+  { "pattern": "MARJANE", "category": "Food & Groceries", "subcategory": "Marjane", "priority": 95 },
+  { "pattern": "CARREFOUR", "category": "Food & Groceries", "subcategory": "Carrefour", "priority": 95 },
+  { "pattern": "BIM", "category": "Food & Groceries", "subcategory": "BIM", "priority": 95 },
+  { "pattern": "LABEL VIE", "category": "Food & Groceries", "subcategory": "Label Vie", "priority": 90 },
+  { "pattern": "JIBI", "category": "Food & Groceries", "subcategory": "Jibi", "priority": 90 },
+
+  { "pattern": "INWI", "category": "Telecom & Recharge", "subcategory": "Inwi", "priority": 95 },
+  { "pattern": "ORANGE", "category": "Telecom & Recharge", "subcategory": "Orange", "priority": 95 },
+  { "pattern": "IAM", "category": "Telecom & Recharge", "subcategory": "Maroc Telecom", "priority": 95 },
+  { "pattern": "RECHARGE", "category": "Telecom & Recharge", "subcategory": "Recharge", "priority": 90 },
+
   { "pattern": "NETFLIX", "category": "Subscriptions", "subcategory": "Netflix", "priority": 100 },
   { "pattern": "SPOTIFY", "category": "Subscriptions", "subcategory": "Spotify", "priority": 100 },
-  { "pattern": "APPLE\\.COM", "category": "Subscriptions", "subcategory": "Apple", "priority": 80 },
-  { "pattern": "RECHARGE", "category": "Telecom & Recharge", "subcategory": "Recharge", "priority": 80 },
-  { "pattern": "INWI", "category": "Telecom & Recharge", "subcategory": "Inwi", "priority": 90 },
+  { "pattern": "APPLE\\.COM", "category": "Subscriptions", "subcategory": "Apple", "priority": 95 },
+  { "pattern": "YOUTUBE", "category": "Subscriptions", "subcategory": "YouTube Premium", "priority": 90 },
+  { "pattern": "AMAZON", "category": "Subscriptions", "subcategory": "Amazon", "priority": 90 },
+
+  { "pattern": "MCDONALD", "category": "Food & Restaurants", "subcategory": "McDonald's", "priority": 95 },
+  { "pattern": "BOOST COFFEE", "category": "Food & Restaurants", "subcategory": "Coffee Shop", "priority": 90 },
+  { "pattern": "STARBUCKS", "category": "Food & Restaurants", "subcategory": "Coffee Shop", "priority": 90 },
+  { "pattern": "KFC", "category": "Food & Restaurants", "subcategory": "KFC", "priority": 90 },
+
+  { "pattern": "UBER", "category": "Transport", "subcategory": "Uber", "priority": 95 },
+  { "pattern": "TAXI", "category": "Transport", "subcategory": "Taxi", "priority": 90 },
+  { "pattern": "CARBURANT", "category": "Transport", "subcategory": "Fuel", "priority": 90 },
+  { "pattern": "AFRIQUIA", "category": "Transport", "subcategory": "Afriquia", "priority": 90 },
+  { "pattern": "WINXO", "category": "Transport", "subcategory": "Winxo", "priority": 90 },
+  { "pattern": "TOTAL", "category": "Transport", "subcategory": "Total Station", "priority": 90 },
+
+  { "pattern": "PLANET SPORT", "category": "Shopping", "subcategory": "Sportswear", "priority": 90 },
+  { "pattern": "DECATHLON", "category": "Shopping", "subcategory": "Sportswear", "priority": 90 },
+  { "pattern": "SHEIN", "category": "Shopping", "subcategory": "Fashion", "priority": 90 },
+  { "pattern": "JUMIA", "category": "Shopping", "subcategory": "Online Shopping", "priority": 90 },
+
   { "pattern": "RETRAIT CARTE", "category": "Cash Withdrawal", "subcategory": "ATM", "priority": 100 },
+  { "pattern": "ATM", "category": "Cash Withdrawal", "subcategory": "ATM", "priority": 90 },
+  { "pattern": "GAB", "category": "Cash Withdrawal", "subcategory": "ATM", "priority": 90 },
+
   { "pattern": "VIREMENT RECU", "category": "Transfers In", "subcategory": "Bank Transfer", "priority": 100 },
   { "pattern": "VIREMENT EMIS", "category": "Transfers Out", "subcategory": "Bank Transfer", "priority": 100 },
-  { "pattern": "FRAIS", "category": "Bank Fees", "subcategory": "Fees", "priority": 100 },
-  { "pattern": "AGIOS", "category": "Bank Fees", "subcategory": "Agios", "priority": 100 }
-]
+  { "pattern": "VIR", "category": "Transfers", "subcategory": "Transfer", "priority": 85 },
 
+  { "pattern": "FRAIS", "category": "Bank Fees", "subcategory": "Fees", "priority": 100 },
+  { "pattern": "AGIOS", "category": "Bank Fees", "subcategory": "Agios", "priority": 100 },
+  { "pattern": "COMMISSION", "category": "Bank Fees", "subcategory": "Commission", "priority": 95 },
+
+  { "pattern": "PHARMA", "category": "Health", "subcategory": "Pharmacy", "priority": 90 },
+  { "pattern": "PHARMACIE", "category": "Health", "subcategory": "Pharmacy", "priority": 90 },
+
+  { "pattern": "", "category": "Other", "subcategory": null, "priority": 1 }
+]
