@@ -45,11 +45,16 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
 
         try {
             // Call authService.findValidSession(sessionToken)
+            // This method checks:
+            // - Session exists
+            // - Session is not invalidated (invalidatedAt == null)
+            // - Session is not expired (expiresAt is in the future)
             var sessionOpt = authService.findValidSession(sessionToken);
 
             if (sessionOpt.isEmpty()) {
-                // Invalid or expired session - continue without authentication
-                log.debug("No valid session found for token");
+                // Invalid, expired, or invalidated session - continue without authentication
+                // This is silent to avoid leaking session validity details
+                log.debug("No valid session found for token (may be invalidated, expired, or not found)");
                 filterChain.doFilter(request, response);
                 return;
             }

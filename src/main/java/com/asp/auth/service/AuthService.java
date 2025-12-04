@@ -183,6 +183,35 @@ public class AuthService {
     }
 
     /**
+     * Invalidates a session by setting invalidatedAt timestamp.
+     * Idempotent: if session doesn't exist, silently ignores.
+     */
+    @Transactional
+    public void invalidateSession(String sessionToken) {
+        if (sessionToken == null || sessionToken.trim().isEmpty()) {
+            return; // Idempotent: ignore empty tokens
+        }
+
+        Optional<UserSession> sessionOpt = userSessionRepository.findBySessionToken(sessionToken);
+
+        if (sessionOpt.isEmpty()) {
+            log.debug("Session not found for token during invalidation - ignoring (idempotent)");
+            return;
+        }
+
+        UserSession session = sessionOpt.get();
+
+        // Only invalidate if not already invalidated
+        if (session.getInvalidatedAt() == null) {
+            session.setInvalidatedAt(Instant.now());
+            userSessionRepository.save(session);
+            log.info("Invalidated session {} for user {}", session.getId(), session.getUser().getEmail());
+        } else {
+            log.debug("Session {} already invalidated", session.getId());
+        }
+    }
+
+    /**
      * Generates a secure random session token (64 characters, URL-safe Base64).
      */
     private String generateSessionToken() {

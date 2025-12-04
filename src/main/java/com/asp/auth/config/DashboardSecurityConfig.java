@@ -31,7 +31,10 @@ public class DashboardSecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .addFilterBefore(sessionAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/auth/**").permitAll()  // All auth endpoints (Google OAuth, dev login, session check)
+                .requestMatchers("/auth/logout").permitAll()  // Logout endpoint (public, only destroys sessions)
+                .requestMatchers("/auth/google/**").permitAll()  // Google OAuth endpoints
+                .requestMatchers("/auth/session/me").permitAll()  // Session check endpoint
+                .requestMatchers("/auth/**").permitAll()  // All other auth endpoints (dev login, etc.)
                 .requestMatchers("/internal/**").permitAll()  // Internal endpoints use token-based auth
                 .anyRequest().authenticated()  // Dashboard pages require session
             );
