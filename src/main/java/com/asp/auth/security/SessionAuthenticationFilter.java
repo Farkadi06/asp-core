@@ -44,7 +44,6 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
         }
 
         try {
-            // TODO: Implement in Step 1
             // Call authService.findValidSession(sessionToken)
             var sessionOpt = authService.findValidSession(sessionToken);
 
