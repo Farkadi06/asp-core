@@ -52,6 +52,14 @@ dependencies {
     
     // Text Similarity (Fuzzy Matching)
     implementation("org.apache.commons:commons-text:1.11.0")
+    
+    // JWT for Google OAuth token verification
+    implementation("io.jsonwebtoken:jjwt-api:0.12.3")
+    implementation("io.jsonwebtoken:jjwt-impl:0.12.3")
+    implementation("io.jsonwebtoken:jjwt-jackson:0.12.3")
+    
+    // HTTP Client for OAuth token exchange
+    implementation("org.springframework.boot:spring-boot-starter-webflux")
 
     // AWS SDK v2
     implementation("software.amazon.awssdk:sqs:2.20.0")

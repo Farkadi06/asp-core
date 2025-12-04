@@ -10,6 +10,7 @@ import com.asp.auth.domain.UserSession;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,11 +21,14 @@ import org.springframework.web.bind.annotation.*;
  * 
  * NOTE: This endpoint is only for development.
  * In production, this will be replaced by Google OAuth.
+ * 
+ * Protected by @Profile("dev") - only available in dev profile.
  */
 @RestController
 @RequestMapping("/auth/dev")
 @RequiredArgsConstructor
 @Slf4j
+@Profile("dev")
 public class DevAuthController {
 
     private final AuthService authService;

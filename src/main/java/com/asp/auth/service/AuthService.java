@@ -129,6 +129,60 @@ public class AuthService {
     }
 
     /**
+     * Handles Google OAuth login - creates or updates user, returns user entity.
+     */
+    @Transactional
+    public User handleGoogleLogin(com.asp.auth.dto.GoogleUserInfo googleUserInfo) {
+        // Check if email is verified
+        if (!googleUserInfo.isEmailVerified()) {
+            throw new IllegalArgumentException("Google email is not verified");
+        }
+
+        // Try to find existing user by email
+        Optional<User> existingUserOpt = userRepository.findByEmail(googleUserInfo.getEmail());
+
+        User user;
+        if (existingUserOpt.isPresent()) {
+            user = existingUserOpt.get();
+            // Update providerUserId if missing
+            if (user.getProviderUserId() == null || user.getProviderUserId().isEmpty()) {
+                user.setProviderUserId(googleUserInfo.getGoogleUserId());
+                user = userRepository.save(user);
+                log.debug("Updated providerUserId for existing user: {}", user.getEmail());
+            }
+        } else {
+            // Get first tenant (dev mode - will be fixed later with onboarding)
+            List<Tenant> tenants = tenantRepository.findAll();
+            if (tenants.isEmpty()) {
+                throw new IllegalStateException("No tenants found in database. Please create a tenant first.");
+            }
+
+            Tenant tenant = tenants.get(0);
+            log.debug("Creating new Google user for email: {} attached to tenant: {}", 
+                    googleUserInfo.getEmail(), tenant.getId());
+
+            // Create new user
+            user = User.builder()
+                    .email(googleUserInfo.getEmail())
+                    .displayName(googleUserInfo.getDisplayName())
+                    .tenant(tenant)
+                    .provider("GOOGLE")
+                    .providerUserId(googleUserInfo.getGoogleUserId())
+                    .createdAt(Instant.now())
+                    .build();
+
+            user = userRepository.save(user);
+            log.info("Created new Google user: {} for tenant: {}", user.getId(), tenant.getId());
+        }
+
+        // Update last login timestamp
+        user.setLastLoginAt(Instant.now());
+        user = userRepository.save(user);
+
+        return user;
+    }
+
+    /**
      * Generates a secure random session token (64 characters, URL-safe Base64).
      */
     private String generateSessionToken() {
