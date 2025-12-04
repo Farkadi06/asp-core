@@ -35,7 +35,7 @@ public class DashboardSecurityConfig {
                 .requestMatchers("/auth/google/**").permitAll()  // Google OAuth endpoints
                 .requestMatchers("/auth/session/me").permitAll()  // Session check endpoint
                 .requestMatchers("/auth/**").permitAll()  // All other auth endpoints (dev login, etc.)
-                .requestMatchers("/internal/**").permitAll()  // Internal endpoints use token-based auth
+                .requestMatchers("/internal/**").authenticated()  // Internal endpoints require authenticated session (UserPrincipal)
                 .anyRequest().authenticated()  // Dashboard pages require session
             );
 

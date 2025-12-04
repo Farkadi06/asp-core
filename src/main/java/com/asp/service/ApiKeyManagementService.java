@@ -31,14 +31,45 @@ public class ApiKeyManagementService {
     private static final int PREFIX_LENGTH = 8;
     private static final int SECRET_LENGTH = 32;
 
+    /**
+     * Public API entry point for creating API keys.
+     * 
+     * NOTE: This method is deprecated. Use createApiKeyForTenant() directly.
+     * Tenant ID should be resolved from the API key (via TenantContext), not from request body.
+     * 
+     * @deprecated Use createApiKeyForTenant() with tenantId from TenantContext
+     */
+    @Deprecated
     @Transactional
     public CreateApiKeyResponse createApiKey(CreateApiKeyRequest request) {
+        // This method is kept for backward compatibility but should not be used.
+        // Public API controller should call createApiKeyForTenant() directly with tenantId from TenantContext.
+        return createApiKeyForTenant(
+                request.getTenantId(),  // This will be null due to @JsonIgnore, but kept for compatibility
+                request.getDisplayName(),
+                request.getScopes(),
+                request.getSandbox() != null ? request.getSandbox() : false
+        );
+    }
+
+    /**
+     * Creates an API key for a tenant.
+     * This method separates "who is the tenant?" from "how it's passed".
+     * 
+     * @param tenantId The tenant ID (resolved from API key or session)
+     * @param displayName Human-readable name for the key
+     * @param scopes Permissions for the key
+     * @param sandbox Whether this is a sandbox key
+     * @return CreateApiKeyResponse with the full API key (shown only once)
+     */
+    @Transactional
+    public CreateApiKeyResponse createApiKeyForTenant(UUID tenantId, String displayName, java.util.Set<String> scopes, boolean sandbox) {
         // Validate tenant exists and is ACTIVE
-        Tenant tenant = tenantRepository.findById(request.getTenantId())
-            .orElseThrow(() -> new IllegalArgumentException("Tenant not found: " + request.getTenantId()));
+        Tenant tenant = tenantRepository.findById(tenantId)
+            .orElseThrow(() -> new IllegalArgumentException("Tenant not found: " + tenantId));
 
         if (tenant.getStatus() != Tenant.TenantStatus.ACTIVE) {
-            throw new IllegalStateException("Tenant is not ACTIVE: " + request.getTenantId());
+            throw new IllegalStateException("Tenant is not ACTIVE: " + tenantId);
         }
 
         // Generate prefix (ensure uniqueness)
@@ -56,7 +87,7 @@ public class ApiKeyManagementService {
         String secret = RandomStringGenerator.generateSecureSecret(SECRET_LENGTH);
 
         // Create full key
-        String fullKey = request.getSandbox() 
+        String fullKey = sandbox 
             ? "asp_sandbox_" + prefix + "_" + secret
             : "asp_live_" + prefix + "_" + secret;
 
@@ -68,15 +99,15 @@ public class ApiKeyManagementService {
             .tenant(tenant)
             .prefix(prefix)
             .keyHash(keyHash)
-            .displayName(request.getDisplayName())
-            .sandbox(request.getSandbox())
-            .scopes(request.getScopes())
+            .displayName(displayName)
+            .sandbox(sandbox)
+            .scopes(scopes)
             .build();
 
         ApiKey savedApiKey = apiKeyRepository.save(apiKey);
 
         // Log the creation
-        ApiKeyActionLogger.logCreate(tenant.getId(), savedApiKey.getId(), prefix, request.getScopes());
+        ApiKeyActionLogger.logCreate(tenant.getId(), savedApiKey.getId(), prefix, scopes);
 
         log.info("Created API key with prefix {} for tenant {}", prefix, tenant.getId());
 
@@ -88,8 +119,14 @@ public class ApiKeyManagementService {
             .build();
     }
 
+    /**
+     * Lists all API keys for a tenant.
+     * 
+     * @param tenantId The tenant ID (resolved from API key or session)
+     * @return List of API key responses (without full key secret)
+     */
     @Transactional(readOnly = true)
-    public List<ApiKeyResponse> listApiKeys(UUID tenantId) {
+    public List<ApiKeyResponse> listApiKeysForTenant(UUID tenantId) {
         List<ApiKey> apiKeys = apiKeyRepository.findByTenantId(tenantId);
 
         return apiKeys.stream()
@@ -97,8 +134,26 @@ public class ApiKeyManagementService {
             .collect(Collectors.toList());
     }
 
+    /**
+     * Lists all API keys for a tenant (public API endpoint).
+     * Tenant ID comes from TenantContext (set by API key authentication).
+     * 
+     * @deprecated Use listApiKeysForTenant() directly
+     */
+    @Deprecated
+    @Transactional(readOnly = true)
+    public List<ApiKeyResponse> listApiKeys(UUID tenantId) {
+        return listApiKeysForTenant(tenantId);
+    }
+
+    /**
+     * Deletes an API key for a tenant.
+     * 
+     * @param tenantId The tenant ID (resolved from API key or session)
+     * @param apiKeyId The API key ID to delete
+     */
     @Transactional
-    public void deleteApiKey(UUID apiKeyId, UUID tenantId) {
+    public void deleteApiKeyForTenant(UUID tenantId, UUID apiKeyId) {
         ApiKey apiKey = apiKeyRepository.findById(apiKeyId)
             .orElseThrow(() -> new IllegalArgumentException("API key not found: " + apiKeyId));
 
@@ -114,6 +169,18 @@ public class ApiKeyManagementService {
         ApiKeyActionLogger.logDelete(apiKeyId);
 
         log.info("Deleted API key {} for tenant {}", apiKeyId, tenantId);
+    }
+
+    /**
+     * Deletes an API key (public API endpoint).
+     * Tenant ID comes from TenantContext (set by API key authentication).
+     * 
+     * @deprecated Use deleteApiKeyForTenant() directly
+     */
+    @Deprecated
+    @Transactional
+    public void deleteApiKey(UUID apiKeyId, UUID tenantId) {
+        deleteApiKeyForTenant(tenantId, apiKeyId);
     }
 
     private ApiKeyResponse mapToResponse(ApiKey apiKey) {

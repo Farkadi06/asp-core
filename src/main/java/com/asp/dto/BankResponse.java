@@ -13,10 +13,10 @@ import java.util.UUID;
 @Builder
 public class BankResponse {
     private UUID id;
+    private String code;
     private String name;
-    private String slug;
+    private String logoUrl;
     private String country;
-    private String connectionType;
-    private String iconUrl;
+    private Boolean active;
 }
 

@@ -45,5 +45,9 @@ public class User {
 
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private String role = "OWNER"; // e.g. "OWNER", "MEMBER"
 }
 

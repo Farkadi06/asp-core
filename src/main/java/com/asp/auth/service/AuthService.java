@@ -4,6 +4,7 @@ import com.asp.auth.domain.User;
 import com.asp.auth.domain.UserSession;
 import com.asp.auth.repository.UserRepository;
 import com.asp.auth.repository.UserSessionRepository;
+import com.asp.auth.util.SlugUtils;
 import com.asp.domain.Tenant;
 import com.asp.domain.TenantRepository;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
@@ -130,6 +132,9 @@ public class AuthService {
 
     /**
      * Handles Google OAuth login - creates or updates user, returns user entity.
+     * 
+     * For new users: automatically creates a new tenant and assigns user as OWNER.
+     * For existing users: updates lastLoginAt and ensures tenant is not null.
      */
     @Transactional
     public User handleGoogleLogin(com.asp.auth.dto.GoogleUserInfo googleUserInfo) {
@@ -144,6 +149,12 @@ public class AuthService {
         User user;
         if (existingUserOpt.isPresent()) {
             user = existingUserOpt.get();
+            
+            // Ensure tenant is not null (safety check)
+            if (user.getTenant() == null) {
+                throw new IllegalStateException("User exists but has no tenant: " + user.getEmail());
+            }
+            
             // Update providerUserId if missing
             if (user.getProviderUserId() == null || user.getProviderUserId().isEmpty()) {
                 user.setProviderUserId(googleUserInfo.getGoogleUserId());
@@ -151,28 +162,41 @@ public class AuthService {
                 log.debug("Updated providerUserId for existing user: {}", user.getEmail());
             }
         } else {
-            // Get first tenant (dev mode - will be fixed later with onboarding)
-            List<Tenant> tenants = tenantRepository.findAll();
-            if (tenants.isEmpty()) {
-                throw new IllegalStateException("No tenants found in database. Please create a tenant first.");
-            }
+            // New user - create tenant and user
+            String tenantName = googleUserInfo.getDisplayName() != null 
+                    ? googleUserInfo.getDisplayName() 
+                    : googleUserInfo.getEmail().split("@")[0];
+            
+            // Generate unique slug
+            String baseSlug = SlugUtils.generateSlug(googleUserInfo.getEmail());
+            String tenantSlug = SlugUtils.generateUniqueSlug(baseSlug, tenantRepository::existsBySlug);
+            
+            // Create new tenant
+            Tenant tenant = Tenant.builder()
+                    .name(tenantName)
+                    .slug(tenantSlug)
+                    .status(Tenant.TenantStatus.ACTIVE)
+                    .plan(Tenant.TenantPlan.FREE)
+                    .createdAt(OffsetDateTime.now())
+                    .updatedAt(OffsetDateTime.now())
+                    .build();
+            
+            tenant = tenantRepository.save(tenant);
+            log.info("Created new tenant: {} (slug: {}) for user: {}", tenant.getId(), tenantSlug, googleUserInfo.getEmail());
 
-            Tenant tenant = tenants.get(0);
-            log.debug("Creating new Google user for email: {} attached to tenant: {}", 
-                    googleUserInfo.getEmail(), tenant.getId());
-
-            // Create new user
+            // Create new user with OWNER role
             user = User.builder()
                     .email(googleUserInfo.getEmail())
                     .displayName(googleUserInfo.getDisplayName())
                     .tenant(tenant)
                     .provider("GOOGLE")
                     .providerUserId(googleUserInfo.getGoogleUserId())
+                    .role("OWNER")
                     .createdAt(Instant.now())
                     .build();
 
             user = userRepository.save(user);
-            log.info("Created new Google user: {} for tenant: {}", user.getId(), tenant.getId());
+            log.info("Created new Google user: {} (OWNER) for tenant: {}", user.getId(), tenant.getId());
         }
 
         // Update last login timestamp

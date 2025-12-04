@@ -2,6 +2,7 @@ package com.asp.api.accounts;
 
 import com.asp.dto.AccountResponse;
 import com.asp.dto.AccountSnapshotResponse;
+import com.asp.dto.PaginatedEnrichedTransactionsResponse;
 import com.asp.dto.PaginatedTransactionsResponse;
 import com.asp.service.AccountQueryService;
 import com.asp.tenant.TenantContext;
@@ -91,6 +92,53 @@ public class AccountsController {
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {
             log.warn("Error getting transactions: {}", e.getMessage());
+            if (e.getMessage().contains("not found")) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+            }
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+    }
+
+    @GetMapping("/{accountId}/enriched-transactions")
+    public ResponseEntity<PaginatedEnrichedTransactionsResponse> getAccountEnrichedTransactions(
+            @PathVariable UUID accountId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false, defaultValue = "100") int limit,
+            @RequestParam(required = false, defaultValue = "0") int offset,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String subcategory,
+            @RequestParam(required = false) String merchant,
+            @RequestParam(required = false) String direction,
+            @RequestParam(required = false) Boolean salary,
+            @RequestParam(required = false) Boolean recurring) {
+        
+        UUID tenantId = TenantContext.getTenantId();
+
+        if (tenantId == null) {
+            log.warn("Tenant context not set for getting enriched transactions");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        log.debug("Getting enriched transactions for account {} (tenant: {})", accountId, tenantId);
+        try {
+            PaginatedEnrichedTransactionsResponse response = accountQueryService.getAccountEnrichedTransactions(
+                    tenantId,
+                    accountId,
+                    startDate,
+                    endDate,
+                    limit,
+                    offset,
+                    category,
+                    subcategory,
+                    merchant,
+                    direction,
+                    salary,
+                    recurring
+            );
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException e) {
+            log.warn("Error getting enriched transactions: {}", e.getMessage());
             if (e.getMessage().contains("not found")) {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
             }

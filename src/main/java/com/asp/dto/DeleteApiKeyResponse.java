@@ -5,12 +5,13 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * Response DTO for API key deletion.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 public class DeleteApiKeyResponse {
-    @Builder.Default
-    private Boolean deleted = true;
+    private boolean deleted;
 }
-
