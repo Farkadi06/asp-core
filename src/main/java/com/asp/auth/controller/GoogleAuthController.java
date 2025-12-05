@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.view.RedirectView;
+import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * Controller for Google OAuth 2.0 authentication.
@@ -47,23 +48,20 @@ public class GoogleAuthController {
      */
     @GetMapping("/callback")
     @Transactional
-    public ResponseEntity<?> googleCallback(
+    public void googleCallback(
             @RequestParam(required = false) String code,
             @RequestParam(required = false) String error,
-            @RequestParam(required = false) String state) {
+            @RequestParam(required = false) String state,
+            HttpServletResponse response) throws Exception {
 
-        // Handle OAuth errors
         if (error != null) {
-            log.warn("Google OAuth error: {}", error);
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body("Google OAuth authentication failed: " + error);
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Google OAuth authentication failed: " + error);
+            return;
         }
 
-        // Validate authorization code
         if (code == null || code.trim().isEmpty()) {
-            log.warn("Missing authorization code in Google OAuth callback");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body("Missing authorization code");
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Missing authorization code");
+            return;
         }
 
         try {
@@ -71,7 +69,7 @@ public class GoogleAuthController {
             GoogleUserInfo userInfo = googleOAuthService.exchangeCodeForUser(code);
             log.debug("Google OAuth successful for email: {}", userInfo.getEmail());
 
-            // Handle Google login (create or update user)
+            // Handle login
             User user = authService.handleGoogleLogin(userInfo);
 
             // Create session
@@ -80,24 +78,19 @@ public class GoogleAuthController {
             // Build session cookie
             var sessionCookie = CookieUtils.buildSessionCookie(session.getSessionToken());
 
-            log.info("Google login successful for user: {} (tenant: {})", 
-                    user.getEmail(), user.getTenant().getId());
+            log.info("Google login successful for user: {} (tenant: {})",
+                     user.getEmail(), user.getTenant().getId());
 
-            // Redirect to dashboard
-            RedirectView redirectView = new RedirectView("/dashboard");
-            return ResponseEntity.status(HttpStatus.FOUND)
-                    .header(HttpHeaders.SET_COOKIE, sessionCookie.toString())
-                    .header(HttpHeaders.LOCATION, "/dashboard")
-                    .build();
+            // Add cookie manually (avoids Spring rewriting issues)
+            response.addHeader(HttpHeaders.SET_COOKIE, sessionCookie.toString());
 
-        } catch (IllegalArgumentException e) {
-            log.error("Google OAuth validation error: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body("Authentication failed: " + e.getMessage());
+            // Redirect manually
+            String frontendUrl = System.getenv().getOrDefault("FRONTEND_URL", "http://localhost:7000");
+            response.sendRedirect(frontendUrl + "/dashboard");
+
         } catch (Exception e) {
             log.error("Google OAuth callback error", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Authentication failed: " + e.getMessage());
+            response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Authentication failed: " + e.getMessage());
         }
     }
 }
